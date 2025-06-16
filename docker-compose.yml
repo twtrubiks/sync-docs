@@ -1,0 +1,67 @@
+
+x-base-app-setting: &x-base-app
+  image: sync-docs
+  build: ./backend
+  volumes:
+    - ./backend:/sync-docs
+
+services:
+
+    test:
+      # 這個服務專門用來跑測試
+      # docker compose up   # 啟動常規服務，跳過測試。
+      # docker compose up test # 只運行測試及其直接依賴。
+      # docker compose --profile testing up # 啟動所有 被標記 profile: "testing" 的服務
+      <<: *x-base-app
+      command: bash -c "pytest --cov=. --cov-report=html"
+      # command: bash -c "pytest -s" # print log
+      profiles:
+        - "testing"
+
+    backend:
+      <<: *x-base-app
+      command: bash -c "python manage.py runserver 0.0.0.0:8000"
+      restart: always
+      ports:
+        - "8000:8000"
+      depends_on:
+        - django-postgres
+        - django-redis
+
+    django-postgres:
+      image: postgres:16
+      # ports:
+      #   - "5432:5432"
+      environment:
+        - POSTGRES_DB=postgres
+        - POSTGRES_USER=myuser
+        - POSTGRES_PASSWORD=password123
+        - PGDATA=/var/lib/postgresql/data/pgdata
+      volumes:
+        - db-data:/var/lib/postgresql/data/pgdata
+
+    django-redis:
+      image: redis
+      restart: always
+      command: ["redis-server", "--appendonly", "yes"]
+      # ports:
+      #   - "6379:6379"
+      volumes:
+        - redis-data:/data
+
+    # 前端 SvelteKit 服務
+    frontend:
+      build: ./frontend
+      container_name: sveltekit_frontend
+      command: sh -c "npx svelte-kit sync && npm run dev"
+      volumes:
+        - ./frontend:/app
+        - /app/node_modules # 一個小技巧：防止本地的 node_modules 覆蓋容器中已安裝的
+      ports:
+        - "5173:5173"
+      depends_on:
+        - backend
+
+volumes:
+  db-data:
+  redis-data:

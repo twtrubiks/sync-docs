@@ -1,0 +1,168 @@
+# SyncDocs - Real-time Collaborative Document Editor
+
+[中文版](README.md)
+
+SyncDocs is a web-based collaborative document editor inspired by Google Docs, built with a modern technology stack. It allows users to create, edit, and share documents with others in real-time.
+
+This project leverages Django Ninja for a high-performance backend API and SvelteKit for a reactive and fast frontend user interface.
+
+This project was completed with assistance from Cline. For reference, see [.clinerules/MVP\_Development.md](https://www.google.com/search?q=.clinerules/MVP_Development.md).
+
+## Screenshots
+
+*Real-time Updates*
+
+*Document Sharing*
+
+## ✨ Key Features
+
+  * **Real-time Collaboration**: Multiple users can edit the same document simultaneously, with changes reflected instantly for all participants, powered by Django Channels.
+  * **Rich Text Editing**: A clean and intuitive editor based on Quill.js, supporting various formatting options.
+  * **User Authentication**: Secure user registration and login system.
+  * **Document Management**: Users can create, view, and manage their documents from a personal dashboard.
+  * **Document Sharing**: Easily share documents with other users for collaboration.
+  * **Fast & Modern Tech Stack**: Utilizes Django Ninja for the backend API and SvelteKit for the frontend, ensuring high performance and a modern development experience.
+
+## 🛠️ Tech Stack
+
+### Backend
+
+  * **Framework**: [Django](https://github.com/twtrubiks/django-tutorial) with [Django Ninja](https://github.com/twtrubiks/django_ninja_tutorial) for building REST APIs
+  * **Real-time Communication**: [Django Channels](https://github.com/twtrubiks/django-chat-room) for handling WebSockets
+  * **Database**: SQLite (for MVP), easily switchable to PostgreSQL
+  * **Async Server**: Uvicorn/Daphne
+  * **Dependencies**:
+      * `django`
+      * `django-ninja`
+      * `channels`
+      * `channels-redis`
+
+### Frontend
+
+  * **Framework**: [SvelteKit](https://kit.svelte.dev/)
+  * **Language**: TypeScript
+  * **Rich Text Editor**: [Quill.js](https://quilljs.com/)
+  * **Styling**: Tailwind CSS
+
+## 📂 Project Structure
+
+The project is primarily divided into two directories:
+
+```plaintext
+.
+├── backend/      # Contains the Django project
+│   ├── docs_app/ # The core Django app for handling documents and users
+│   └── backend/  # Django project configuration
+└── frontend/     # Contains the SvelteKit project
+    ├── src/
+    │   ├── routes/ # SvelteKit's file-based routing
+    │   └── lib/    # Svelte components and utility functions
+```
+
+## 🚀 Local Development Setup
+
+Follow these steps to set up and run the project on your local machine.
+
+### Prerequisites
+
+  * [Python](https://www.python.org/downloads/) 3.12+
+  * [Node.js](https://nodejs.org/) 18+ and npm (or pnpm/yarn)
+  * [Redis](https://redis.io/docs/getting-started/installation/) (for the real-time collaboration feature)
+
+### Quick Start (Using Docker, Recommended)
+
+```bash
+docker compose up --build
+```
+
+### Local Development (Without Docker)
+
+#### 1\. Backend Setup
+
+```bash
+# Navigate to the backend directory
+cd backend
+
+# Create and activate a virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Apply database migrations
+python manage.py migrate
+
+# Start the Django development server
+# The API will be available at http://127.0.0.1:8000
+python manage.py runserver
+```
+
+#### 2\. Frontend Setup
+
+Open a new terminal window.
+
+```bash
+# Navigate to the frontend directory
+cd frontend
+
+# Install Node.js dependencies
+npm install
+
+# Start the SvelteKit development server
+# The frontend will be available at http://localhost:5173
+npm run dev -- --open
+```
+
+### Accessing the Application
+
+  * **Frontend**: Open your browser and navigate to `http://localhost:5173`.
+  * **Backend API Docs**: The auto-generated API documentation is available at `http://127.0.0.1:8000/api/docs`.
+
+### 📖 API Documentation
+
+The backend API is built with Django Ninja, which provides automated, interactive documentation available at [http://127.0.0.1:8000/api/docs](http://127.0.0.1:8000/api/docs).
+
+### Running Tests
+
+Run tests using Docker:
+
+```bash
+docker compose --profile testing up
+```
+
+Run tests locally:
+
+```bash
+pytest --cov=. --cov-report=html
+```
+
+### 🔮 Future Roadmap
+
+This project is an MVP (Minimum Viable Product) with plenty of room for improvement. Here are some potential future features:
+
+  * **Advanced Permissions**: Implement role-based access control (e.g., view-only, comment-only, edit access).
+  * **Presence Indicators**: Show which users are currently viewing or editing the document.
+  * **Cursor Presence**: Display collaborators' cursors in real-time.
+  * **Document Version History**: Allow users to view and revert to previous versions of a document.
+  * **Folder Organization**: Implement a folder system for better document management.
+  * **Deployment**: Create a production-ready deployment setup using Docker, Gunicorn, and Nginx.
+  * **Comprehensive Testing**: Add more unit and end-to-end tests to ensure stability.
+
+## Donation
+
+All articles are original creations resulting from my own research and internalizing the concepts. If you find them helpful and wish to encourage me, you are welcome to buy me a coffee :laughing:
+
+ECPay (No membership required)
+[Sponsor Link](http://bit.ly/2F7Jrha)
+
+O'Pay (Membership required)
+[Sponsor Link](https://payment.opay.tw/Broadcaster/Donate/9E47FDEF85ABE383A0F5FC6A218606F8)
+
+## List of Sponsors
+
+[List of Sponsors](https://github.com/twtrubiks/Thank-you-for-donate)
+
+## License
+
+[MIT license](https://www.google.com/search?q=LICENSE)
