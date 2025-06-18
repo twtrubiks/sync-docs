@@ -1,14 +1,20 @@
+import json
 import pytest
 from django.contrib.auth import get_user_model
-import json
 
 User = get_user_model()
 
+# 測試資料常數
+TEST_USERNAME = "testuser"
+TEST_PASSWORD = "a-very-strong-password123"
+WRONG_PASSWORD = "wrongpassword"
+
 @pytest.fixture
 def user_data():
+    """提供標準測試使用者資料"""
     return {
-        "username": "testuser",
-        "password": "a-very-strong-password123"
+        "username": TEST_USERNAME,
+        "password": TEST_PASSWORD
     }
 
 @pytest.mark.django_db
@@ -65,14 +71,14 @@ def test_user_login_fails_with_wrong_password(client, user_data):
     # 2. 嘗試用錯誤密碼登入
     login_data = {
         "username": user_data["username"],
-        "password": "wrongpassword"
+        "password": WRONG_PASSWORD
     }
     response = client.post(
         "/api/token/pair",
         data=json.dumps(login_data),
         content_type="application/json"
     )
-    assert response.status_code == 401 # Unauthorized
+    assert response.status_code == 401  # Unauthorized
 
 @pytest.mark.django_db
 def test_authenticated_user_can_access_protected_route(client, user_data):
@@ -92,11 +98,11 @@ def test_authenticated_user_can_access_protected_route(client, user_data):
     )
     token = response.json()["access"]
 
-    # 2. 使用 token 存取受保護的路由
-    headers = {
-        "Authorization": f"Bearer {token}"
-    }
-    response = client.get("/api/auth/me", headers=headers)
+    # 2. 使用 token 存取受保護的路由 (修正：使用 HTTP_AUTHORIZATION 而非 headers)
+    response = client.get(
+        "/api/auth/me",
+        HTTP_AUTHORIZATION=f"Bearer {token}"
+    )
 
     assert response.status_code == 200
     response_data = response.json()
