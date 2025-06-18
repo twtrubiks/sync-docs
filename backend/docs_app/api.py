@@ -1,4 +1,5 @@
 import uuid
+import logging
 from ninja_extra import api_controller, http_get, http_post, http_put, http_delete
 from ninja import Schema
 from django.shortcuts import get_object_or_404
@@ -11,6 +12,9 @@ from django.contrib.auth.models import User
 from django.db.models import Q
 from channels.layers import get_channel_layer
 import asyncio
+
+# 獲取日誌記錄器
+logger = logging.getLogger('docs_app')
 
 class UserSchema(Schema):
     id: int
@@ -47,100 +51,213 @@ class DocumentUpdateSchema(Schema):
 
 @api_controller("/documents", tags=["documents"], auth=JWTAuth(), permissions=[IsAuthenticated])
 class DocumentController:
+
+    def _get_user_accessible_documents_query(self, user):
+        """
+        返回用戶可以訪問的文檔查詢條件（擁有或被分享的文檔）
+        """
+        return Q(owner=user) | Q(shared_with=user)
+
+    def _get_document_with_permission_check(self, document_id, user, owner_only=False):
+        """
+        獲取文檔並檢查權限，如果沒有權限則拋出404
+
+        Args:
+            document_id: 文檔ID
+            user: 當前用戶
+            owner_only: 是否只允許擁有者訪問
+
+        Returns:
+            Document: 文檔對象，已設置is_owner屬性
+        """
+        try:
+            if owner_only:
+                query = Q(owner=user)
+                logger.debug(f"用戶 {user.username} 嘗試以擁有者身份訪問文檔 {document_id}")
+            else:
+                query = self._get_user_accessible_documents_query(user)
+                logger.debug(f"用戶 {user.username} 嘗試訪問文檔 {document_id}")
+
+            document = get_object_or_404(
+                Document.objects.select_related('owner'),
+                Q(id=document_id) & query
+            )
+
+            # 動態設置is_owner標誌
+            document.is_owner = (document.owner == user)
+            logger.info(f"用戶 {user.username} 成功訪問文檔 {document_id}")
+            return document
+
+        except Exception as e:
+            logger.warning(f"用戶 {user.username} 訪問文檔 {document_id} 失敗: {str(e)}")
+            raise
+
+    def _set_is_owner_flag(self, documents, user):
+        """
+        為文檔列表設置is_owner標誌
+
+        Args:
+            documents: 文檔查詢集或列表
+            user: 當前用戶
+        """
+        for doc in documents:
+            doc.is_owner = (doc.owner == user)
+
     @http_post("/", response=DocumentSchema)
     def create_document(self, payload: DocumentCreateSchema):
         """
-        Creates a new document.
+        創建新文檔
+
+        Args:
+            payload: 包含文檔標題和內容的創建請求
+
+        Returns:
+            DocumentSchema: 創建的文檔信息
         """
-        document = Document.objects.create(**payload.dict(exclude_none=True), owner=self.context.request.auth)
-        document.is_owner = True # The creator is always the owner
-        return document
+        user = self.context.request.auth
+        try:
+            logger.info(f"用戶 {user.username} 嘗試創建新文檔: {payload.title}")
+            document = Document.objects.create(
+                **payload.dict(exclude_none=True),
+                owner=user
+            )
+            document.is_owner = True  # 創建者始終是擁有者
+            logger.info(f"用戶 {user.username} 成功創建文檔 {document.id}: {document.title}")
+            return document
+        except Exception as e:
+            logger.error(f"用戶 {user.username} 創建文檔失敗: {str(e)}")
+            raise
 
     @http_get("/", response=List[DocumentListSchema])
     def list_documents(self):
         """
-        Retrieves a list of documents owned by or shared with the user.
+        獲取用戶擁有或被分享的文檔列表
+
+        Returns:
+            List[DocumentListSchema]: 文檔列表，包含基本信息和擁有者標誌
         """
         user = self.context.request.auth
-        documents = Document.objects.select_related('owner').filter(Q(owner=user) | Q(shared_with=user)).distinct()
+        query = self._get_user_accessible_documents_query(user)
+        documents = Document.objects.select_related('owner').filter(query).distinct()
 
-        # Dynamically set the is_owner flag for each document
-        for doc in documents:
-            doc.is_owner = (doc.owner == user)
+        # 為每個文檔設置is_owner標誌
+        self._set_is_owner_flag(documents, user)
 
         return documents
 
     @http_get("/{document_id}/", response=DocumentSchema)
     def get_document(self, document_id: uuid.UUID):
         """
-        Retrieves a specific document by its ID, if the user has access.
+        根據ID獲取特定文檔（如果用戶有訪問權限）
+
+        Args:
+            document_id: 文檔的UUID
+
+        Returns:
+            DocumentSchema: 文檔詳細信息
         """
         user = self.context.request.auth
-        query = Q(owner=user) | Q(shared_with=user)
-        document = get_object_or_404(Document.objects.select_related('owner'), Q(id=document_id) & query)
-
-        # Dynamically set the is_owner flag
-        document.is_owner = (document.owner == user)
-
+        document = self._get_document_with_permission_check(document_id, user)
         return document
 
     @http_put("/{document_id}/", response=DocumentSchema)
     def update_document(self, document_id: uuid.UUID, payload: DocumentUpdateSchema):
         """
-        Updates a specific document, if the user has access.
-        Also broadcasts the update to collaborators.
+        更新特定文檔（如果用戶有訪問權限）
+        同時向協作者廣播更新事件
+
+        Args:
+            document_id: 文檔的UUID
+            payload: 包含更新內容的請求數據
+
+        Returns:
+            DocumentSchema: 更新後的文檔信息
         """
         user = self.context.request.auth
-        query = Q(owner=user) | Q(shared_with=user)
-        document = get_object_or_404(Document.objects.select_related('owner'), Q(id=document_id) & query)
+        document = self._get_document_with_permission_check(document_id, user)
 
+        # 更新文檔屬性
         for attr, value in payload.dict(exclude_unset=True).items():
             setattr(document, attr, value)
         document.save()
 
-        # Broadcast the save event to the document's channel group
-        channel_layer = get_channel_layer()
-        room_group_name = f'doc_{document.id}'
-
-        # Use asyncio to run the async channel_layer.group_send in a sync context
-        asyncio.run(
-            channel_layer.group_send(
-                room_group_name,
-                {
-                    "type": "doc_saved",
-                    "updated_at": document.updated_at.isoformat(),
-                },
-            )
-        )
-
-        # Dynamically set the is_owner flag
-        document.is_owner = (document.owner == user)
+        # 向文檔的頻道組廣播保存事件
+        self._broadcast_document_saved(document)
 
         return document
+
+    def _broadcast_document_saved(self, document):
+        """
+        向文檔的協作者廣播文檔已保存的事件
+
+        Args:
+            document: 已保存的文檔對象
+        """
+        try:
+            channel_layer = get_channel_layer()
+            room_group_name = f'doc_{document.id}'
+
+            logger.debug(f"廣播文檔 {document.id} 保存事件到頻道組 {room_group_name}")
+
+            # 在同步上下文中運行異步的channel_layer.group_send
+            asyncio.run(
+                channel_layer.group_send(
+                    room_group_name,
+                    {
+                        "type": "doc_saved",
+                        "updated_at": document.updated_at.isoformat(),
+                    },
+                )
+            )
+            logger.debug(f"成功廣播文檔 {document.id} 保存事件")
+        except Exception as e:
+            logger.error(f"廣播文檔 {document.id} 保存事件失敗: {str(e)}")
 
     @http_delete("/{document_id}/")
     def delete_document(self, document_id: uuid.UUID):
         """
-        Deletes a specific document.
+        刪除特定文檔（僅擁有者可以刪除）
+
+        Args:
+            document_id: 要刪除的文檔UUID
+
+        Returns:
+            dict: 包含成功標誌的響應
         """
-        document = get_object_or_404(Document, id=document_id, owner=self.context.request.auth)
+        user = self.context.request.auth
+        document = self._get_document_with_permission_check(document_id, user, owner_only=True)
         document.delete()
         return {"success": True}
 
     @http_get("/{document_id}/collaborators/", response=List[UserSchema])
     def get_collaborators(self, document_id: uuid.UUID):
         """
-        Gets the list of collaborators for a document. Only owner can access.
+        獲取文檔的協作者列表（僅擁有者可以訪問）
+
+        Args:
+            document_id: 文檔的UUID
+
+        Returns:
+            List[UserSchema]: 協作者用戶列表
         """
-        document = get_object_or_404(Document, id=document_id, owner=self.context.request.auth)
+        user = self.context.request.auth
+        document = self._get_document_with_permission_check(document_id, user, owner_only=True)
         return document.shared_with.all()
 
     @http_post("/{document_id}/collaborators/", response=UserSchema)
     def add_collaborator(self, document_id: uuid.UUID, payload: ShareRequestSchema):
         """
-        Adds a collaborator to a document. Only owner can add.
+        為文檔添加協作者（僅擁有者可以添加）
+
+        Args:
+            document_id: 文檔的UUID
+            payload: 包含要添加用戶名的請求數據
+
+        Returns:
+            UserSchema: 被添加的用戶信息
         """
-        document = get_object_or_404(Document, id=document_id, owner=self.context.request.auth)
+        user = self.context.request.auth
+        document = self._get_document_with_permission_check(document_id, user, owner_only=True)
         user_to_add = get_object_or_404(User, username=payload.username)
         document.shared_with.add(user_to_add)
         return user_to_add
@@ -148,9 +265,17 @@ class DocumentController:
     @http_delete("/{document_id}/collaborators/{user_id}/")
     def remove_collaborator(self, document_id: uuid.UUID, user_id: int):
         """
-        Removes a collaborator from a document. Only owner can remove.
+        從文檔中移除協作者（僅擁有者可以移除）
+
+        Args:
+            document_id: 文檔的UUID
+            user_id: 要移除的用戶ID
+
+        Returns:
+            dict: 包含成功標誌的響應
         """
-        document = get_object_or_404(Document, id=document_id, owner=self.context.request.auth)
+        user = self.context.request.auth
+        document = self._get_document_with_permission_check(document_id, user, owner_only=True)
         user_to_remove = get_object_or_404(User, id=user_id)
         document.shared_with.remove(user_to_remove)
         return {"success": True}
