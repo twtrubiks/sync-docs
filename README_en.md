@@ -6,18 +6,24 @@ SyncDocs is a web-based collaborative document editor inspired by Google Docs, b
 
 This project leverages Django Ninja for a high-performance backend API and SvelteKit for a reactive and fast frontend user interface.
 
-This project was completed with assistance from Cline. For reference, see [.clinerules/MVP\_Development.md](https://www.google.com/search?q=.clinerules/MVP_Development.md).
+This project was completed with assistance from Cline. For reference, see [.clinerules/MVP\_Development.md](.clinerules/MVP_Development.md)
 
 ## Screenshots
 
+![alt tag](https://cdn.imgpile.com/f/wqSGcM2_xl.png)
+
 *Real-time Updates*
 
+![alt tag](https://cdn.imgpile.com/f/eoPjnL3_xl.png)
+
 *Document Sharing*
+
+![alt tag](https://cdn.imgpile.com/f/qVOuhaq_xl.png)
 
 ## ✨ Key Features
 
   * **Real-time Collaboration**: Multiple users can edit the same document simultaneously, with changes reflected instantly for all participants, powered by Django Channels.
-  * **Rich Text Editing**: A clean and intuitive editor based on Quill.js, supporting various formatting options.
+  * **Rich Text Editing**: A clean and intuitive editor based on [Core Architecture of the Quill.js Delta Format](Delta_en.md), supporting various formatting options.
   * **User Authentication**: Secure user registration and login system.
   * **Document Management**: Users can create, view, and manage their documents from a personal dashboard.
   * **Document Sharing**: Easily share documents with other users for collaboration.
@@ -123,6 +129,8 @@ npm run dev -- --open
 
 The backend API is built with Django Ninja, which provides automated, interactive documentation available at [http://127.0.0.1:8000/api/docs](http://127.0.0.1:8000/api/docs).
 
+![alt tag](https://cdn.imgpile.com/f/rgw7Ll0_xl.png)
+
 ### Running Tests
 
 Run tests using Docker:
@@ -136,6 +144,8 @@ Run tests locally:
 ```bash
 pytest --cov=. --cov-report=html
 ```
+
+![alt tag](https://cdn.imgpile.com/f/JvWwDwA_md.png)
 
 ### 🔮 Future Roadmap
 
@@ -154,6 +164,9 @@ This project is an MVP (Minimum Viable Product) with plenty of room for improvem
 All articles are original creations resulting from my own research and internalizing the concepts. If you find them helpful and wish to encourage me, you are welcome to buy me a coffee :laughing:
 
 ECPay (No membership required)
+
+![alt tag](https://payment.ecpay.com.tw/Upload/QRCode/201906/QRCode_672351b8-5ab3-42dd-9c7c-c24c3e6a10a0.png)
+
 [Sponsor Link](http://bit.ly/2F7Jrha)
 
 O'Pay (Membership required)

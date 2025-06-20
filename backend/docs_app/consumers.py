@@ -42,15 +42,23 @@ class DocConsumer(AsyncWebsocketConsumer):
 
         try:
             # 檢查用戶是否是文檔擁有者或協作者
-            query = Q(owner=user) | Q(shared_with=user)
-            has_access = Document.objects.filter(Q(id=document_id) & query).exists()
+            document = Document.objects.filter(id=document_id).first()
+            if not document:
+                logger.warning(f"文檔 {document_id} 不存在")
+                return False
 
-            if has_access:
-                logger.info(f"用戶 {user.username} 有權限訪問文檔 {document_id}")
-            else:
-                logger.warning(f"用戶 {user.username} 無權限訪問文檔 {document_id}")
+            # 檢查是否是擁有者
+            if document.owner == user:
+                logger.info(f"用戶 {user.username} 是文檔 {document_id} 的擁有者")
+                return True
 
-            return has_access
+            # 檢查是否是協作者
+            if document.shared_with.filter(id=user.id).exists():
+                logger.info(f"用戶 {user.username} 是文檔 {document_id} 的協作者")
+                return True
+
+            logger.warning(f"用戶 {user.username} 無權限訪問文檔 {document_id}")
+            return False
         except Exception as e:
             logger.error(f"檢查用戶 {user.username} 對文檔 {document_id} 的權限時發生錯誤: {str(e)}")
             return False

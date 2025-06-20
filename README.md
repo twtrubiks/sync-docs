@@ -23,7 +23,7 @@ SyncDocs 是一款受 Google Docs 啟發、基於現代技術堆疊打造的網�
 ## ✨ 主要功能
 
 * **即時協作**：多位使用者可同時編輯同一份文件，變更會即時反映給所有參與者，由 Django Channels 提供支援。
-* **豐富文本編輯**：基於 Quill.js 的簡潔直觀編輯器，支援多種格式選項。
+* **豐富文本編輯**：基於 [Quill.js Delta 的核心技術結構](Delta.md) 的簡潔直觀編輯器，支援多種格式選項。
 * **使用者驗證**：安全的用戶註冊和登入系統。
 * **文件管理**：使用者可以從個人儀表板建立、查看和管理自己的文件。
 * **文件共享**：輕鬆與其他使用者共享文件。
@@ -145,7 +145,7 @@ docker compose --profile testing up
 pytest --cov=. --cov-report=html
 ```
 
-![alt tag](https://cdn.imgpile.com/f/CFoGl0z_xl.png)
+![alt tag](https://cdn.imgpile.com/f/JvWwDwA_md.png)
 
 ### 🔮 未來規劃
 

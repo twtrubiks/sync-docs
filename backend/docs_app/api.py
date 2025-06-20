@@ -102,6 +102,7 @@ class DocumentController:
         """
         for doc in documents:
             doc.is_owner = (doc.owner == user)
+
     @http_post("/", response=DocumentSchema)
     def create_document(self, payload: DocumentCreateSchema):
         """
