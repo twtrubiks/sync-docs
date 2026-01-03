@@ -29,7 +29,7 @@ services:
         - django-redis
 
     django-postgres:
-      image: postgres:16
+      image: postgres:18
       # ports:
       #   - "5432:5432"
       environment:
@@ -41,7 +41,7 @@ services:
         - db-data:/var/lib/postgresql/data/pgdata
 
     django-redis:
-      image: redis
+      image: redis:8-alpine
       restart: always
       command: ["redis-server", "--appendonly", "yes"]
       # ports:

@@ -35,7 +35,7 @@ SyncDocs 是一款受 Google Docs 啟發、基於現代技術堆疊打造的網�
 
 * **框架**：[Django](https://github.com/twtrubiks/django-tutorial) 搭配 [Django Ninja](https://github.com/twtrubiks/django_ninja_tutorial) 建構 REST API
 * **即時通訊**：[Django Channels](https://github.com/twtrubiks/django-chat-room) 處理 WebSocket
-* **資料庫**：SQLite (用於 MVP)，可輕鬆切換至 PostgreSQL
+* **資料庫**：PostgreSQL（Docker 環境預設使用）
 * **非同步伺服器**：Uvicorn/Daphne
 * **依賴套件**：
   * `django`
@@ -146,6 +146,45 @@ pytest --cov=. --cov-report=html
 ```
 
 ![alt tag](https://cdn.imgpile.com/f/JvWwDwA_md.png)
+
+## 📚 學習資源
+
+本專案作為**教學示範項目**，提供完整的學習文檔幫助你理解系統設計和實作細節：
+
+### 核心文檔
+
+* **[📖 學習路徑指南 (LEARNING_PATH.md)](LEARNING_PATH.md)**
+  * 📋 6 個階段的循序漸進學習計畫
+  * 🎯 每個階段的檢查點和實作練習
+  * 💡 關鍵代碼的詳細解釋和教學註釋
+  * ⏱️ 預計學習時間：15-20 天
+  * 🎓 適合：全端開發初學者、想學習即時協作功能的開發者
+
+* **[🏗️ 架構設計文檔 (ARCHITECTURE.md)](ARCHITECTURE.md)**
+  * 🎨 完整的系統架構圖和數據流程圖
+  * 🤔 技術選型理由和對比分析
+  * 🎭 設計模式的實際應用（Repository、Observer、Middleware...）
+  * 🔐 安全性設計和效能優化策略
+  * 📊 架構決策記錄 (ADR)
+  * 🎓 適合：中級開發者、架構師、面試準備
+
+* **[⚙️ Quill.js Delta 核心技術 (Delta.md)](Delta.md)**
+  * 🔍 深入理解 Delta 資料模型
+  * 💡 為什麼選擇 Delta 而非 HTML
+  * 🤝 Delta 如何支援即時協作
+  * 🎓 適合：想理解富文本編輯器原理的開發者
+
+### 開發文檔
+
+* **[📋 MVP 開發清單 (.clinerules/MVP_Development.md)](.clinerules/MVP_Development.md)**
+  * 完整的開發階段規劃
+  * 前後端功能清單
+
+### 建議閱讀順序
+
+1. 🎯 **初學者**：Delta.md → LEARNING_PATH.md（跟著步驟學習）
+2. 🏗️ **有經驗的開發者**：ARCHITECTURE.md → LEARNING_PATH.md（選擇性深入）
+3. 👨‍🏫 **教師/講師**：ARCHITECTURE.md（課程大綱）+ LEARNING_PATH.md（教學進度）
 
 ### 🔮 未來規劃
 

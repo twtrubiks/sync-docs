@@ -35,7 +35,7 @@ This project was completed with assistance from Cline. For reference, see [.clin
 
   * **Framework**: [Django](https://github.com/twtrubiks/django-tutorial) with [Django Ninja](https://github.com/twtrubiks/django_ninja_tutorial) for building REST APIs
   * **Real-time Communication**: [Django Channels](https://github.com/twtrubiks/django-chat-room) for handling WebSockets
-  * **Database**: SQLite (for MVP), easily switchable to PostgreSQL
+  * **Database**: PostgreSQL (default in Docker environment)
   * **Async Server**: Uvicorn/Daphne
   * **Dependencies**:
       * `django`
@@ -146,6 +146,45 @@ pytest --cov=. --cov-report=html
 ```
 
 ![alt tag](https://cdn.imgpile.com/f/JvWwDwA_md.png)
+
+## 📚 Learning Resources
+
+As an **educational demonstration project**, this project provides comprehensive learning documentation to help you understand the system design and implementation details:
+
+### Core Documentation
+
+* **[📖 Learning Path Guide (LEARNING_PATH.md)](LEARNING_PATH.md)**
+  * 📋 6-stage progressive learning plan
+  * 🎯 Checkpoints and hands-on exercises for each stage
+  * 💡 Detailed explanations and teaching annotations for key code
+  * ⏱️ Estimated learning time: 15-20 days
+  * 🎓 Best for: Full-stack beginners, developers wanting to learn real-time collaboration
+
+* **[🏗️ Architecture Design Documentation (ARCHITECTURE.md)](ARCHITECTURE.md)**
+  * 🎨 Complete system architecture diagrams and data flow charts
+  * 🤔 Technology selection rationale and comparison analysis
+  * 🎭 Real-world application of design patterns (Repository, Observer, Middleware...)
+  * 🔐 Security design and performance optimization strategies
+  * 📊 Architecture Decision Records (ADRs)
+  * 🎓 Best for: Intermediate developers, architects, interview preparation
+
+* **[⚙️ Quill.js Delta Core Technology (Delta_en.md)](Delta_en.md)**
+  * 🔍 Deep dive into the Delta data model
+  * 💡 Why choose Delta over HTML
+  * 🤝 How Delta supports real-time collaboration
+  * 🎓 Best for: Developers wanting to understand rich text editor principles
+
+### Development Documentation
+
+* **[📋 MVP Development Checklist (.clinerules/MVP_Development.md)](.clinerules/MVP_Development.md)**
+  * Complete development phase planning
+  * Frontend and backend feature lists
+
+### Recommended Reading Order
+
+1. 🎯 **Beginners**: Delta_en.md → LEARNING_PATH.md (follow the steps)
+2. 🏗️ **Experienced Developers**: ARCHITECTURE.md → LEARNING_PATH.md (selective deep dive)
+3. 👨‍🏫 **Teachers/Instructors**: ARCHITECTURE.md (course outline) + LEARNING_PATH.md (teaching schedule)
 
 ### 🔮 Future Roadmap
 
