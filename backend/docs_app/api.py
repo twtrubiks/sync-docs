@@ -1,7 +1,6 @@
 import uuid
 import logging
 from ninja_extra import api_controller, http_get, http_post, http_put, http_delete
-from ninja import Schema
 from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
 from django.http import Http404
@@ -9,47 +8,21 @@ from .models import Document
 from typing import List
 from ninja_jwt.authentication import JWTAuth
 from ninja_extra.permissions import IsAuthenticated
-from datetime import datetime
 from django.contrib.auth.models import User
 from django.db.models import Q
 from channels.layers import get_channel_layer
 import asyncio
+from .schemas import (
+    UserSchema,
+    ShareRequestSchema,
+    DocumentListSchema,
+    DocumentSchema,
+    DocumentCreateSchema,
+    DocumentUpdateSchema,
+)
 
 # 獲取日誌記錄器
 logger = logging.getLogger('docs_app')
-
-class UserSchema(Schema):
-    id: int
-    username: str
-    email: str
-
-class ShareRequestSchema(Schema):
-    username: str
-
-class DocumentListSchema(Schema):
-    id: uuid.UUID
-    title: str
-    owner: UserSchema
-    created_at: datetime
-    updated_at: datetime
-    is_owner: bool = False # Will be set dynamically
-
-class DocumentSchema(Schema):
-    id: uuid.UUID
-    title: str
-    content: dict
-    owner: UserSchema
-    created_at: datetime
-    updated_at: datetime
-    is_owner: bool = False # Will be set dynamically
-
-class DocumentCreateSchema(Schema):
-    title: str
-    content: dict = None
-
-class DocumentUpdateSchema(Schema):
-    title: str = None
-    content: dict = None
 
 @api_controller("/documents", tags=["documents"], auth=JWTAuth(), permissions=[IsAuthenticated])
 class DocumentController:

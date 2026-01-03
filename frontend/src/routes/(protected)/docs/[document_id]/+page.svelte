@@ -3,7 +3,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import QuillEditor from '$lib/components/QuillEditor.svelte';
-	import { get, put, del, post } from '$lib/auth';
+	import { get, put, del, post, type User } from '$lib/auth';
 	import { toast } from '@zerodevx/svelte-toast';
 
 	// Svelte 5: $page store auto-subscription still works
@@ -18,16 +18,16 @@
 	let isOwner = $state(false);
 	let lastSavedTime: string | null = $state(null);
 	let saveStatus: 'idle' | 'unsaved' | 'saving' | 'saved' | 'error' | 'connecting' = $state('connecting');
-	let debounceTimeout: any = $state(null);
+	let debounceTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 
 	// State for sharing modal
 	let showShareModal = $state(false);
-	let collaborators: any[] = $state([]);
+	let collaborators: User[] = $state([]);
 	let newCollaboratorUsername = $state('');
 
 	// State for remove confirmation modal
 	let showRemoveConfirmModal = $state(false);
-	let collaboratorToRemove: { id: number; username: string } | null = $state(null);
+	let collaboratorToRemove: User | null = $state(null);
 
 	async function getCollaborators() {
 		try {
@@ -71,7 +71,7 @@
 		}
 	}
 
-	function openRemoveConfirm(collaborator: { id: number; username: string }) {
+	function openRemoveConfirm(collaborator: User) {
 		collaboratorToRemove = collaborator;
 		showRemoveConfirmModal = true;
 	}

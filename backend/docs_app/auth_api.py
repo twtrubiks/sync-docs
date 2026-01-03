@@ -5,29 +5,16 @@
 
 import logging
 from ninja_extra import api_controller, http_post, route, http_get
-from ninja import Schema
 from django.contrib.auth.models import User
 from ninja_jwt.controller import NinjaJWTDefaultController
 from ninja_jwt.authentication import JWTAuth
 from ninja_jwt.tokens import RefreshToken
 from django.core.exceptions import ValidationError
 from django.contrib.auth.password_validation import validate_password
+from .schemas import UserSchema, RegisterSchema
 
 # 獲取日誌記錄器
 logger = logging.getLogger('docs_app')
-
-
-class UserSchema(Schema):
-    """用戶信息響應模式"""
-    username: str
-    email: str = None
-
-
-class RegisterSchema(Schema):
-    """用戶註冊請求模式"""
-    username: str
-    password: str
-    email: str = None  # 可選欄位
 
 @api_controller("/auth", tags=["auth"], permissions=[])
 class AuthController(NinjaJWTDefaultController):

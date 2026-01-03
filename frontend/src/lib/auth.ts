@@ -3,9 +3,10 @@ import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
 
 // User interface
-interface User {
+export interface User {
+  id: number;
   username: string;
-  email: string;
+  email: string | null;
 }
 
 // Create a writable store with an initial value from localStorage if in browser

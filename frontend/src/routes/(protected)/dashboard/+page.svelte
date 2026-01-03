@@ -1,17 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { get, post, del } from '$lib/auth';
+  import { get, post, del, type User } from '$lib/auth';
 
   interface Document {
     id: string; // Changed from number to string for UUID
     title: string;
     is_owner: boolean;
-    owner: {
-      id: number;
-      username: string;
-      email: string;
-    };
+    owner: User;
   }
 
   // Svelte 5 Runes: use $state() for reactive state
