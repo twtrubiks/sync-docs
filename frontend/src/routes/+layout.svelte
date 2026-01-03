@@ -1,7 +1,8 @@
 <script lang="ts">
   import '../app.css';
   import { SvelteToast } from '@zerodevx/svelte-toast';
-  import { isAuthenticated, logout } from '$lib/auth';
+  import { isAuthenticated, logout, user, fetchCurrentUser } from '$lib/auth';
+  import { browser } from '$app/environment';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
@@ -14,6 +15,13 @@
     logout();
     goto('/login');
   }
+
+  // Fetch user info on mount if authenticated (handles page refresh)
+  onMount(() => {
+    if (browser && $isAuthenticated && !$user) {
+      fetchCurrentUser();
+    }
+  });
 
   // Client-side route guard
   onMount(() => {
@@ -39,6 +47,10 @@
   <!-- Svelte 5: $store auto-subscription still works for stores -->
   {#if $isAuthenticated}
     <a href="/dashboard" class="text-gray-700 hover:text-blue-600">Dashboard</a>
+    <div class="flex-grow"></div>
+    {#if $user}
+      <span class="text-gray-700">歡迎, {$user.username}</span>
+    {/if}
     <!-- Svelte 5: onclick instead of on:click -->
     <button onclick={handleLogout} class="text-gray-700 hover:text-blue-600 p-0 bg-transparent border-none cursor-pointer">Logout</button>
   {:else}
