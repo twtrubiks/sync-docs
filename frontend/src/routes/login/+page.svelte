@@ -3,8 +3,9 @@
   import { goto } from '$app/navigation';
   import { toast } from '@zerodevx/svelte-toast';
 
-  let username = '';
-  let password = '';
+  // Svelte 5 Runes: use $state() for reactive state
+  let username = $state('');
+  let password = $state('');
 
   async function handleSubmit() {
     const response = await fetch('/api/token/pair', {
@@ -31,11 +32,18 @@
       });
     }
   }
+
+  // Svelte 5: Wrapper to handle preventDefault manually
+  function handleFormSubmit(e: SubmitEvent) {
+    e.preventDefault();
+    handleSubmit();
+  }
 </script>
 
 <div class="max-w-md mx-auto mt-10 p-6 border border-gray-300 rounded-lg shadow-lg">
   <h1 class="text-2xl font-bold mb-6 text-center">Login</h1>
-  <form on:submit|preventDefault={handleSubmit} class="space-y-4">
+  <!-- Svelte 5: onsubmit instead of on:submit|preventDefault -->
+  <form onsubmit={handleFormSubmit} class="space-y-4">
     <div>
       <label for="username" class="block mb-1 font-medium text-gray-700">Username</label>
       <input type="text" id="username" bind:value={username} required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />

@@ -148,7 +148,8 @@ Document.objects.filter(owner=user)
 - 關鍵概念：
   - 第三方庫在 Svelte 中的整合
   - 為什麼 Quill 需要動態導入（SSR 限制）
-  - `$:` 響應式語法
+  - Svelte 5 Runes 語法：`$state()`、`$derived()`、`$effect()`、`$props()`
+  - `$bindable()` 實現雙向綁定（如 `bind:editor`）
 
 **3.4 狀態管理與自動保存**
 - 閱讀檔案：`frontend/src/routes/(protected)/docs/[document_id]/+page.svelte`
@@ -156,7 +157,8 @@ Document.objects.filter(owner=user)
 
 ### 階段檢查點
 - [ ] 理解 SvelteKit 檔案系統路由如何工作
-- [ ] 能解釋 `bind:this` 和 `bind:editor` 的區別
+- [ ] 能解釋 Svelte 5 的 `$props()` 和 `$bindable()` 如何實現雙向綁定
+- [ ] 理解 `$state()`、`$derived()`、`$effect()` 的使用場景
 - [ ] 理解 Delta 的三種操作（insert, retain, delete）
 
 ---
@@ -256,7 +258,8 @@ Document.objects.filter(owner=user)
 - [ ] JWT Token 包含哪些部分？為什麼需要 Refresh Token？
 
 ### 前端
-- [ ] `$:` 響應式語法的原理是什麼？
+- [ ] Svelte 5 Runes（`$state`、`$derived`、`$effect`）如何取代舊的 `$:` 語法？
+- [ ] `$props()` 和 `$bindable()` 如何實現元件屬性和雙向綁定？
 - [ ] 為什麼 Quill 需要在 `onMount` 中初始化？
 
 ### 即時協作

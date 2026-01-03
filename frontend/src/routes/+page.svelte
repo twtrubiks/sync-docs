@@ -4,8 +4,9 @@
   import { isAuthenticated } from '$lib/auth';
   import { browser } from '$app/environment';
 
+  // Use onMount + subscribe for redirect logic
+  // This ensures proper store subscription and cleanup
   onMount(() => {
-    // We need to ensure this only runs on the client
     if (browser) {
       const unsubscribe = isAuthenticated.subscribe(loggedIn => {
         if (loggedIn) {
@@ -14,9 +15,6 @@
           goto('/login', { replaceState: true });
         }
       });
-
-      // It's good practice to unsubscribe, though in this case,
-      // the component is destroyed upon navigation anyway.
       return unsubscribe;
     }
   });

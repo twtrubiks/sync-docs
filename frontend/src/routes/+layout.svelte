@@ -5,6 +5,10 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
+  import type { Snippet } from 'svelte';
+
+  // Svelte 5 Runes: $props() with Snippet type for children
+  let { children }: { children: Snippet } = $props();
 
   function handleLogout() {
     logout();
@@ -32,9 +36,11 @@
 
 <nav class="flex gap-4 p-4 bg-gray-100 border-b border-gray-300">
   <a href="/" class="text-gray-700 hover:text-blue-600">Home</a>
+  <!-- Svelte 5: $store auto-subscription still works for stores -->
   {#if $isAuthenticated}
     <a href="/dashboard" class="text-gray-700 hover:text-blue-600">Dashboard</a>
-    <button on:click={handleLogout} class="text-gray-700 hover:text-blue-600 p-0 bg-transparent border-none cursor-pointer">Logout</button>
+    <!-- Svelte 5: onclick instead of on:click -->
+    <button onclick={handleLogout} class="text-gray-700 hover:text-blue-600 p-0 bg-transparent border-none cursor-pointer">Logout</button>
   {:else}
     <a href="/login" class="text-gray-700 hover:text-blue-600">Login</a>
     <a href="/register" class="text-gray-700 hover:text-blue-600">Register</a>
@@ -42,7 +48,8 @@
 </nav>
 
 <main class="p-4">
-  <slot />
+  <!-- Svelte 5: {@render children()} instead of <slot /> -->
+  {@render children()}
 </main>
 
 <SvelteToast />

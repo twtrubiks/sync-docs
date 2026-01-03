@@ -14,7 +14,8 @@
     };
   }
 
-  let documents: Document[] = [];
+  // Svelte 5 Runes: use $state() for reactive state
+  let documents = $state<Document[]>([]);
 
   onMount(async () => {
     try {
@@ -52,7 +53,8 @@
 <div class="max-w-4xl mx-auto mt-10">
   <div class="flex justify-between items-center mb-6">
     <h1 class="text-3xl font-bold">Dashboard</h1>
-    <button on:click={createNewDocument} class="py-2 px-4 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700">
+    <!-- Svelte 5: onclick instead of on:click -->
+    <button onclick={createNewDocument} class="py-2 px-4 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700">
       Create New Document
     </button>
   </div>
@@ -64,8 +66,9 @@
           <div class="flex items-center">
             <span class="text-sm text-gray-500 mr-4">Owner: {doc.owner.username}</span>
             {#if doc.is_owner}
+              <!-- Svelte 5: onclick with manual stopPropagation and preventDefault -->
               <button
-              on:click|stopPropagation={(e) => { e.preventDefault(); deleteDocument(doc.id); }}
+              onclick={(e) => { e.stopPropagation(); e.preventDefault(); deleteDocument(doc.id); }}
               class="py-1 px-3 bg-red-600 text-white font-semibold rounded-md hover:bg-red-700 text-sm ml-4"
             >
               Delete

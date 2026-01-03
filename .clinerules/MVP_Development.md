@@ -57,18 +57,24 @@
   * 在客戶端儲存認證 token (`localStorage` Cookie - 後者更安全但設定稍複雜)。
   * 設定 SvelteKit `fetch` 請求時自動帶上認證 token。
   * 實現登出功能。
-* **富文本編輯器整合 (Quill.js in SvelteKit Component)**
+* **富文本編輯器整合 (Quill.js in SvelteKit Component - Svelte 5 Runes)**
   * 建立一個名為 `QuillEditor.svelte` 的組件。
+  * 使用 Svelte 5 Runes 語法：
+    * `$props()` + `$bindable()` 實現雙向綁定 (`bind:value`, `bind:editor`)
+    * `$effect()` 監聽內容變化並同步到編輯器
+    * callback props 取代 `createEventDispatcher` 處理事件
   * 在該組件中初始化 Quill.js，配置基本工具列。
-  * 實現從 props 載入文件內容到 Quill 編輯器。
   * 實現獲取 Quill 編輯器內容 (Delta 格式)。
 * **文件操作流程 (SvelteKit)**
   * **儀表板頁面 (`/dashboard/+page.svelte`):**
     * 呼叫 `GET /api/documents/` 獲取文件列表並顯示。
     * "創建新文件" 按鈕，呼叫 `POST /api/documents/` 並跳轉到新文件的編輯頁面。
-  * **編輯器頁面 (`/docs/{document_id}/+page.svelte`):**
+  * **編輯器頁面 (`/docs/{document_id}/+page.svelte` - Svelte 5 Runes):**
     * 從路由參數獲取 `document_id`。
-    * 呼叫 `GET /api/documents/{document__id}/` 獲取文件內容並載入到 `QuillEditor` 組件。
+    * 使用 `$state()` 管理響應式狀態（標題、內容、保存狀態等）
+    * 使用 `$derived.by()` 計算派生狀態（如狀態文字顯示）
+    * 使用 `$effect()` 實現自動保存邏輯（防抖 1.5 秒）
+    * 呼叫 `GET /api/documents/{document_id}/` 獲取文件內容並載入到 `QuillEditor` 組件。
     * 自動保存邏輯，將 Quill 內容 (Delta) 通過 `PUT /api/documents/{document_id}/` 保存到後端。
 * **分享功能界面 (SvelteKit)**
   * 在文件編輯器頁面新增一個「共用」按鈕。
@@ -89,11 +95,12 @@
   * `connect()`: 更新身份驗證邏輯，允許 `owner` 或在 `shared_with` 列表中的使用者建立 WebSocket 連線並加入協作 Channel Group。
   * `disconnect()`: 從 Channel Group 移除。
   * `receive_json()`: 接收來自客戶端的編輯操作 (Quill Delta)並廣播。
-* **SvelteKit 端 WebSocket 整合**
-  * 在文件編輯器頁面 (`/docs/{document_id}/+page.svelte` 或其子組件/Svelte store) 中：
-    * 建立 WebSocket 連接到 Django Channels 的 `DocConsumer` (`ws://localhost:8000/ws/docs/{document_id}/?token={auth_token}`)
-    * **發送更改：** 監聽本地 Quill 編輯器的 `text-change` 事件，獲取 Delta，並通過 WebSocket 發送給後端。
-    * **接收更改：** 監聽 WebSocket 訊息，接收到其他用戶的 Delta 後，將其應用到本地 Quill 編輯器實例 (注意避免與本地產生的事件衝突，Quill API 允許傳遞 `source` 參數)。
+* **SvelteKit 端 WebSocket 整合 (Svelte 5 Runes)**
+  * 在文件編輯器頁面 (`/docs/{document_id}/+page.svelte`) 中：
+    * 使用 `$state()` 管理 WebSocket 連接狀態
+    * 在 `onMount()` 建立 WebSocket 連接到 Django Channels 的 `DocConsumer`
+    * **發送更改：** 通過 callback props (`onTextChange`) 監聽 Quill 編輯器的 `text-change` 事件，獲取 Delta，並通過 WebSocket 發送給後端。
+    * **接收更改：** 監聽 WebSocket 訊息，接收到其他用戶的 Delta 後，使用 `editor.updateContents(delta, 'silent')` 應用到本地編輯器（避免觸發本地事件）。
 * **(MVP 簡化) 衝突處理：**
   * 依賴伺服器廣播的順序，或 "最後編輯者獲勝" 的隱含邏輯。不實現複雜的 OT/CRDT。
 
@@ -101,6 +108,6 @@
 
 * **Django Ninja Schemas:** 充分利用 Pydantic schema 進行數據驗證和序列化，能大大提高 API 的健壯性和開發效率。
 * **SvelteKit Load Functions:** 使用 SvelteKit 的 `load` 函數 (`+page.server.js` 或 `+layout.server.js`) 在伺服器端或客戶端載入頁面所需數據，這有助於數據預取和更好的用戶體驗。
-* **SvelteKit Stores:** 使用 Svelte stores 管理全局或跨組件的狀態 (例如，用戶認證狀態、當前文檔的共享 WebSocket 實例)。
+* **Svelte 5 Runes 與 Stores:** 使用 `$state()` 管理組件狀態，Svelte stores 管理全局狀態（如認證狀態）。`$store` 自動訂閱語法在 Svelte 5 仍然支援。
 * **API 版本控制 (Django Ninja):** 雖然 MVP 可能不需要，但長遠來看，Django Ninja 容易實現 API 版本控制。
 * **CORS (跨域資源共享):** 如果 Django 和 SvelteKit 在開發時運行在不同端口，或生產環境中部署在不同域名，需要在 Django (例如使用 `django-cors-headers`) 中正確配置 CORS。

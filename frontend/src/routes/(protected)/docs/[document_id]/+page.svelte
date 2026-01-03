@@ -6,25 +6,28 @@
 	import { get, put, del, post } from '$lib/auth';
 	import { toast } from '@zerodevx/svelte-toast';
 
+	// Svelte 5: $page store auto-subscription still works
 	const documentId = $page.params.document_id;
-	let title = '';
-	let content: any = {}; // Quill's content can be an object (Delta)
-	let editor: any; // To hold the Quill instance
-	let socket: WebSocket | null = null;
-	let owner: { username: string } | null = null;
-	let isOwner = false;
-	let lastSavedTime: string | null = null;
-	let saveStatus: 'idle' | 'unsaved' | 'saving' | 'saved' | 'error' | 'connecting' = 'connecting';
-	let debounceTimeout: any;
+
+	// Svelte 5 Runes: use $state() for reactive state
+	let title = $state('');
+	let content: any = $state({}); // Quill's content can be an object (Delta)
+	let editor: any = $state(null); // To hold the Quill instance
+	let socket: WebSocket | null = $state(null);
+	let owner: { username: string } | null = $state(null);
+	let isOwner = $state(false);
+	let lastSavedTime: string | null = $state(null);
+	let saveStatus: 'idle' | 'unsaved' | 'saving' | 'saved' | 'error' | 'connecting' = $state('connecting');
+	let debounceTimeout: any = $state(null);
 
 	// State for sharing modal
-	let showShareModal = false;
-	let collaborators: any[] = [];
-	let newCollaboratorUsername = '';
+	let showShareModal = $state(false);
+	let collaborators: any[] = $state([]);
+	let newCollaboratorUsername = $state('');
 
 	// State for remove confirmation modal
-	let showRemoveConfirmModal = false;
-	let collaboratorToRemove: { id: number; username: string } | null = null;
+	let showRemoveConfirmModal = $state(false);
+	let collaboratorToRemove: { id: number; username: string } | null = $state(null);
 
 	async function getCollaborators() {
 		try {
@@ -105,38 +108,34 @@
 		}
 	}
 
+	// Svelte 5 Runes: $effect() replaces $: for side effects
 	// When the modal is opened, fetch the current collaborators
-	$: if (showShareModal) {
-		getCollaborators();
-	}
+	$effect(() => {
+		if (showShareModal) {
+			getCollaborators();
+		}
+	});
 
-	let statusText: string;
-	$: {
+	// Svelte 5 Runes: $derived.by() replaces $: for complex derivations
+	const statusText = $derived.by(() => {
 		switch (saveStatus) {
 			case 'connecting':
-				statusText = 'Connecting...';
-				break;
+				return 'Connecting...';
 			case 'unsaved':
-				statusText = 'Unsaved changes';
-				break;
+				return 'Unsaved changes';
 			case 'saving':
-				statusText = 'Saving...';
-				break;
+				return 'Saving...';
 			case 'saved':
-				statusText = 'All changes saved';
-				break;
+				return 'All changes saved';
 			case 'error':
-				statusText = 'Error saving document';
-				break;
+				return 'Error saving document';
 			default: // idle
 				if (lastSavedTime) {
-					statusText = `Last save at ${new Date(lastSavedTime).toLocaleTimeString()}`;
-				} else {
-					statusText = 'Ready';
+					return `Last save at ${new Date(lastSavedTime).toLocaleTimeString()}`;
 				}
-				break;
+				return 'Ready';
 		}
-	}
+	});
 
 	onMount(async () => {
 		try {
@@ -251,8 +250,9 @@
 		}
 	}
 
-	function handleContentChange(event: CustomEvent) {
-		const { delta, source } = event.detail;
+	// Svelte 5: Updated handler signature for callback prop (no more CustomEvent)
+	function handleContentChange(detail: { delta: any; source: string }) {
+		const { delta, source } = detail;
 		if (source !== 'user') return;
 
 		if (socket && socket.readyState === WebSocket.OPEN) {
@@ -291,7 +291,7 @@
 				<input
 					type="text"
 					bind:value={title}
-					on:input={debouncedSave}
+					oninput={debouncedSave}
 					class="doc-title-input"
 					placeholder="Untitled Document"
 				/>
@@ -301,7 +301,7 @@
 		<div class="header-right">
 			{#if isOwner}
 				<button
-					on:click={() => (showShareModal = true)}
+					onclick={() => (showShareModal = true)}
 					class="share-button"
 				>
 					<svg
@@ -317,14 +317,15 @@
 				</button>
 			{/if}
 			{#if isOwner}
-				<button on:click={handleDelete} class="delete-button"> Delete </button>
+				<button onclick={handleDelete} class="delete-button"> Delete </button>
 			{/if}
 		</div>
 	</header>
 
 	<main class="main-content">
 		<div class="editor-wrapper">
-			<QuillEditor bind:value={content} bind:editor on:text-change={handleContentChange} />
+			<!-- Svelte 5: Use onTextChange callback prop instead of on:text-change event -->
+			<QuillEditor bind:value={content} bind:editor onTextChange={handleContentChange} />
 		</div>
 	</main>
 </div>
@@ -343,7 +344,7 @@
 						placeholder="Enter username"
 						class="collaborator-input"
 					/>
-					<button on:click={handleAddCollaborator} class="add-button">Add</button>
+					<button onclick={handleAddCollaborator} class="add-button">Add</button>
 				</div>
 			{/if}
 
@@ -356,7 +357,7 @@
 							<span class="collaborator-email">({collaborator.email})</span>
 						</div>
 						{#if isOwner}
-							<button on:click={() => openRemoveConfirm(collaborator)} class="remove-button"
+							<button onclick={() => openRemoveConfirm(collaborator)} class="remove-button"
 								>Remove</button
 							>
 						{/if}
@@ -365,7 +366,7 @@
 			</ul>
 
 			<div class="modal-actions">
-				<button on:click={() => (showShareModal = false)} class="done-button"> Done </button>
+				<button onclick={() => (showShareModal = false)} class="done-button"> Done </button>
 			</div>
 		</div>
 	</div>
@@ -383,7 +384,7 @@
 			</p>
 			<div class="modal-actions">
 				<button
-					on:click={() => {
+					onclick={() => {
 						showRemoveConfirmModal = false;
 						collaboratorToRemove = null;
 					}}
@@ -391,7 +392,7 @@
 				>
 					Cancel
 				</button>
-				<button on:click={confirmRemoveCollaborator} class="confirm-remove-button">
+				<button onclick={confirmRemoveCollaborator} class="confirm-remove-button">
 					Remove
 				</button>
 			</div>

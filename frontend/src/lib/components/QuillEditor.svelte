@@ -1,15 +1,21 @@
 <script lang="ts">
-  import { onMount, createEventDispatcher } from 'svelte';
+  import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import 'quill/dist/quill.snow.css'; // Import Quill's snow theme CSS
 
   let editorContainer: HTMLElement;
   let Quill: any;
 
-  export let value: any = { ops: [] };
-  export let editor: Quill; // Expose the Quill instance
-
-  const dispatch = createEventDispatcher();
+  // Svelte 5 Runes: $props() with $bindable() for two-way binding
+  let {
+    value = $bindable({ ops: [] }),
+    editor = $bindable(),
+    onTextChange
+  }: {
+    value?: any;
+    editor?: any;
+    onTextChange?: (detail: { delta: any; source: string }) => void;
+  } = $props();
 
   onMount(async () => {
     if (browser) {
@@ -36,22 +42,25 @@
         editor.setContents(value, 'silent');
       }
 
-      editor.on('text-change', (delta, oldDelta, source) => {
+      editor.on('text-change', (delta: any, oldDelta: any, source: string) => {
         // Always update the bound value
         value = editor.getContents();
-        // Dispatch an event with the delta and source for the parent to handle
-        dispatch('text-change', { delta, source });
+        // Call the callback prop instead of dispatching an event
+        onTextChange?.({ delta, source });
       });
     }
   });
 
-  // When the value prop changes from the parent, update the editor's content
-  $: if (editor && value && value.ops) {
-    // A simple stringify comparison to prevent infinite update loops
-    if (JSON.stringify(value) !== JSON.stringify(editor.getContents())) {
-      editor.setContents(value, 'silent');
+  // Svelte 5 Runes: $effect() replaces $: reactive statement
+  $effect(() => {
+    // When the value prop changes from the parent, update the editor's content
+    if (editor && value && value.ops) {
+      // A simple stringify comparison to prevent infinite update loops
+      if (JSON.stringify(value) !== JSON.stringify(editor.getContents())) {
+        editor.setContents(value, 'silent');
+      }
     }
-  }
+  });
 </script>
 
 <div class="quill-container" bind:this={editorContainer}></div>
