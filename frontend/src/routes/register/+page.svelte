@@ -4,6 +4,7 @@
 
   // Svelte 5 Runes: use $state() for reactive state
   let username = $state('');
+  let email = $state('');
   let password = $state('');
   let confirmPassword = $state('');
 
@@ -24,7 +25,11 @@
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({
+        username,
+        password,
+        ...(email.trim() && { email: email.trim() })
+      }),
     });
 
     if (response.ok) {
@@ -65,6 +70,18 @@
     <div>
       <label for="username" class="block mb-1 font-medium text-gray-700">Username</label>
       <input type="text" id="username" bind:value={username} required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+    </div>
+    <div>
+      <label for="email" class="block mb-1 font-medium text-gray-700">
+        Email <span class="text-gray-400 text-sm font-normal">(optional)</span>
+      </label>
+      <input
+        type="email"
+        id="email"
+        bind:value={email}
+        placeholder="your@email.com"
+        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
     </div>
     <div>
       <label for="password" class="block mb-1 font-medium text-gray-700">Password</label>

@@ -308,3 +308,48 @@ def test_user_login_missing_fields(client):
         content_type="application/json"
     )
     assert response.status_code == 400  # Bad Request
+
+
+@pytest.mark.django_db
+def test_user_registration_with_email(client):
+    """
+    測試註冊時可以帶入 email。
+    """
+    user_data_with_email = {
+        "username": "emailuser",
+        "password": "a-very-strong-password123",
+        "email": "user@example.com"
+    }
+
+    response = client.post(
+        "/api/auth/register",
+        data=json.dumps(user_data_with_email),
+        content_type="application/json"
+    )
+
+    assert response.status_code == 200
+    response_data = response.json()
+    assert response_data["username"] == "emailuser"
+    assert response_data["email"] == "user@example.com"
+
+    # 驗證資料庫中的 email
+    created_user = User.objects.get(username="emailuser")
+    assert created_user.email == "user@example.com"
+
+
+@pytest.mark.django_db
+def test_user_registration_without_email(client, user_data):
+    """
+    測試註冊時不帶 email 仍然成功（向後相容）。
+    """
+    response = client.post(
+        "/api/auth/register",
+        data=json.dumps(user_data),  # 只有 username 和 password
+        content_type="application/json"
+    )
+
+    assert response.status_code == 200
+    response_data = response.json()
+    assert response_data["username"] == user_data["username"]
+    # email 應該是 None 或空字串
+    assert response_data["email"] in [None, ""]

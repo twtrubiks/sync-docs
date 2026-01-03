@@ -27,6 +27,7 @@ class RegisterSchema(Schema):
     """用戶註冊請求模式"""
     username: str
     password: str
+    email: str = None  # 可選欄位
 
 @api_controller("/auth", tags=["auth"], permissions=[])
 class AuthController(NinjaJWTDefaultController):
@@ -47,7 +48,7 @@ class AuthController(NinjaJWTDefaultController):
         註冊新用戶
 
         Args:
-            payload: 包含用戶名和密碼的註冊數據
+            payload: 包含用戶名、密碼和可選 email 的註冊數據
 
         Returns:
             UserSchema: 新創建的用戶信息
@@ -69,7 +70,8 @@ class AuthController(NinjaJWTDefaultController):
             # 創建新用戶
             user = User.objects.create_user(
                 username=payload.username,
-                password=payload.password
+                password=payload.password,
+                email=payload.email or ""
             )
 
             logger.info(f"成功註冊新用戶: {user.username}")
