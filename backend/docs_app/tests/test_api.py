@@ -475,3 +475,40 @@ def test_removed_collaborator_loses_access(authenticated_client, collaborator_us
     document = Document.objects.get(id=document_id)
     assert document.title == doc_data["title"] # Should be original title
     assert document.content == doc_data["content"]
+
+
+def test_owner_cannot_share_document_with_self(authenticated_client):
+    """測試擁有者不能將自己添加為協作者"""
+    client, owner_user, owner_access_token = authenticated_client
+
+    # 1. 擁有者建立文檔
+    doc_data = {"title": "Self Share Test Doc", "content": {"data": "content"}}
+    response_create = client.post(
+        DOCUMENTS_ENDPOINT,
+        data=doc_data,
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
+    )
+    assert response_create.status_code == 200
+    document_id = response_create.json()["id"]
+    document = Document.objects.get(id=document_id)
+
+    # 2. 擁有者嘗試將自己添加為協作者
+    share_data = {"username": owner_user.username}
+    response_share = client.post(
+        f"/api/documents/{document_id}/collaborators/",
+        data=json.dumps(share_data),
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
+    )
+
+    # 3. 預期返回 400 錯誤
+    assert response_share.status_code == 400, f"Expected 400, got {response_share.status_code}: {response_share.content.decode()}"
+    response_data = response_share.json()
+    assert "detail" in response_data
+    assert "yourself" in response_data["detail"].lower()
+
+    # 4. 驗證擁有者未被添加到 shared_with
+    document.refresh_from_db()
+    assert owner_user not in document.shared_with.all()
+    assert document.shared_with.count() == 0

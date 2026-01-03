@@ -59,18 +59,15 @@
 					'--toastBarBackground': '#2F855A'
 				}
 			});
-		} catch (error) {
+		} catch (error: any) {
 			console.error('Failed to add collaborator:', error);
-			toast.push(
-				'Failed to add collaborator. Make sure the username is correct and the user exists.',
-				{
-					theme: {
-						'--toastBackground': '#F56565',
-						'--toastColor': 'white',
-						'--toastBarBackground': '#C53030'
-					}
+			toast.push(error.message || 'Failed to add collaborator.', {
+				theme: {
+					'--toastBackground': '#F56565',
+					'--toastColor': 'white',
+					'--toastBarBackground': '#C53030'
 				}
-			);
+			});
 		}
 	}
 

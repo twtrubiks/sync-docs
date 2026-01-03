@@ -62,8 +62,18 @@ async function apiFetch(url: string, options: RequestInit = {}) {
       // Throw an error to stop further processing
       throw new Error('Unauthorized');
     }
-    // You might want to handle other errors more gracefully
-    throw new Error(`API request failed: ${response.statusText}`);
+
+    // 嘗試從 response body 提取錯誤訊息
+    let errorMessage = `API request failed: ${response.statusText}`;
+    try {
+      const errorData = await response.json();
+      // HttpError 使用 "detail"，其他格式可能用 "message"
+      errorMessage = errorData.detail || errorData.message || errorMessage;
+    } catch {
+      // 無法解析 JSON，使用預設訊息
+    }
+
+    throw new Error(errorMessage);
   }
 
   if (response.status === 204) {

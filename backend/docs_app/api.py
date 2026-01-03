@@ -2,7 +2,9 @@ import uuid
 import logging
 from ninja_extra import api_controller, http_get, http_post, http_put, http_delete
 from ninja import Schema
+from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
+from django.http import Http404
 from .models import Document
 from typing import List
 from ninja_jwt.authentication import JWTAuth
@@ -78,10 +80,12 @@ class DocumentController:
                 query = self._get_user_accessible_documents_query(user)
                 logger.debug(f"用戶 {user.username} 嘗試訪問文檔 {document_id}")
 
-            document = get_object_or_404(
-                Document.objects.select_related('owner'),
+            document = Document.objects.select_related('owner').filter(
                 Q(id=document_id) & query
-            )
+            ).distinct().first()
+
+            if document is None:
+                raise Http404("Document not found")
 
             # 動態設置is_owner標誌
             document.is_owner = (document.owner == user)
@@ -259,6 +263,11 @@ class DocumentController:
         user = self.context.request.auth
         document = self._get_document_with_permission_check(document_id, user, owner_only=True)
         user_to_add = get_object_or_404(User, username=payload.username)
+
+        # 檢查是否分享給自己
+        if user_to_add.id == user.id:
+            raise HttpError(400, "You cannot share a document with yourself.")
+
         document.shared_with.add(user_to_add)
         return user_to_add
 
