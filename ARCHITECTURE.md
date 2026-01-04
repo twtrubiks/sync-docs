@@ -184,10 +184,10 @@ SyncDocs 是一個**教學型**的即時協作文件編輯器，展示了現代�
 │ 渲染    │
 └─────────┘
 
-步驟 2: 建立 WebSocket 連接
+步驟 2: 建立 WebSocket 連接（使用 Subprotocol 認證）
 ┌─────────┐                                    ┌──────────────┐
-│ 前端 A  │  WS /ws/docs/{id}/?token=xxx       │  Consumer    │
-├─────────┤                                    ├──────────────┤
+│ 前端 A  │  WS /ws/docs/{id}/                 │  Consumer    │
+├─────────┤  Subprotocol: access_token.xxx     ├──────────────┤
 │         ├───────────────────────────────────▶│ 1. 認證      │
 │         │                                    │    (JWT)     │
 │         │                                    │ 2. 檢查權限  │
@@ -635,8 +635,7 @@ NINJA_JWT = {
 - ✅ Token 簽名防篡改
 - ✅ 過期時間限制
 - ✅ Refresh Token 輪換機制
-- ⚠️ 教學版：Token 在 URL 中（WebSocket）
-- 🔒 生產版：應使用更安全的方案
+- ✅ WebSocket 使用 Subprotocol 傳遞 Token（不在 URL 中）
 
 ### 2. 權限控制
 

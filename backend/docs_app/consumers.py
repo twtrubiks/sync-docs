@@ -88,7 +88,14 @@ class DocConsumer(AsyncWebsocketConsumer):
                 self.room_group_name,
                 self.channel_name
             )
-            await self.accept()
+
+            # 獲取接受的 subprotocol（來自 JWTAuthMiddleware）
+            accepted_subprotocol = self.scope.get('accepted_subprotocol')
+            if accepted_subprotocol:
+                await self.accept(subprotocol=accepted_subprotocol)
+            else:
+                await self.accept()
+
             logger.info(f"用戶 {self.user.username} 成功連接到文檔 {self.document_id}")
         else:
             # 拒絕連接

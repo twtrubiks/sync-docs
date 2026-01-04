@@ -152,8 +152,9 @@
 				return;
 			}
 			const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-			const wsUrl = `${wsProtocol}//localhost:8000/ws/docs/${documentId}/?token=${token}`;
-			socket = new WebSocket(wsUrl);
+			// 使用 subprotocol 傳遞 token，而非 URL query string（更安全）
+			const wsUrl = `${wsProtocol}//localhost:8000/ws/docs/${documentId}/`;
+			socket = new WebSocket(wsUrl, [`access_token.${token}`]);
 
 			socket.onopen = () => {
 				console.log('WebSocket connection established');
