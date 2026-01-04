@@ -108,6 +108,23 @@ CHANNEL_LAYERS = {
 WEBSOCKET_MAX_MESSAGE_SIZE = int(os.environ.get('WEBSOCKET_MAX_MESSAGE_SIZE', 256 * 1024))  # 256KB
 WEBSOCKET_MAX_OPS_COUNT = int(os.environ.get('WEBSOCKET_MAX_OPS_COUNT', 1000))
 
+# 連接數量限制
+WEBSOCKET_MAX_CONNECTIONS_PER_USER = int(
+    os.environ.get('WEBSOCKET_MAX_CONNECTIONS_PER_USER', 5)
+)
+
+# 速率限制（滑動窗口）
+WEBSOCKET_RATE_LIMIT_MESSAGES = int(
+    os.environ.get('WEBSOCKET_RATE_LIMIT_MESSAGES', 30)
+)  # 每窗口最大消息數
+WEBSOCKET_RATE_LIMIT_WINDOW = int(
+    os.environ.get('WEBSOCKET_RATE_LIMIT_WINDOW', 10)
+)  # 窗口大小（秒）
+
+# Redis 配置
+REDIS_HOST = os.environ.get("REDIS_HOST", "django-redis")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
+
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases

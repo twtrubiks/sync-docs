@@ -340,6 +340,8 @@ backend/
     │
     ├── routing.py             # 🛣️ WebSocket 路由
     ├── auth_middleware.py     # 🔒 WebSocket 認證中間件
+    ├── connection_manager.py  # 🔗 WebSocket 連接數量管理
+    ├── rate_limiter.py        # ⏱️ 消息速率限制
     │
     └── tests/                 # 🧪 測試
         ├── conftest.py        # 測試配置
@@ -685,6 +687,37 @@ Document.objects.filter(owner=user)
 cursor.execute(f"SELECT * FROM document WHERE owner={user.id}")  # 危險！
 ```
 
+### 6. WebSocket 安全機制
+
+**認證失敗處理：**
+- ✅ 連接失敗時發送具體錯誤原因（type: connection_error）
+- ✅ 使用 WebSocket Close Codes (4001-4008)
+- ✅ 支持多種錯誤類型：TOKEN_EXPIRED、PERMISSION_DENIED、DOCUMENT_NOT_FOUND 等
+
+**連接數量限制：**
+```python
+# 每用戶最多 5 個並發 WebSocket 連接（可配置）
+WEBSOCKET_MAX_CONNECTIONS_PER_USER = 5
+```
+- ✅ 使用 Redis SET 追蹤活躍連接
+- ✅ Lua 腳本確保原子性操作
+- ✅ 防止單一用戶資源耗盡
+
+**消息速率限制：**
+```python
+# 滑動窗口算法：每 10 秒最多 30 條消息
+WEBSOCKET_RATE_LIMIT_MESSAGES = 30
+WEBSOCKET_RATE_LIMIT_WINDOW = 10
+```
+- ✅ 使用 Redis Sorted Set 實現滑動窗口
+- ✅ 返回 retry_after 提示客戶端等待時間
+- ✅ 防止惡意客戶端濫發消息
+
+**消息驗證：**
+- ✅ 消息大小限制（256KB）
+- ✅ Pydantic Schema 驗證 Delta 格式
+- ✅ 操作數量限制（1000 個 ops）
+
 ---
 
 ## ⚡ 效能考量
@@ -755,6 +788,36 @@ class Meta:
 **查詢加速：**
 - 文件列表頁：`O(log n)` vs `O(n)`
 - 特別是大量文件時效果顯著
+
+### 5. Redis 使用策略
+
+**Channel Layer（WebSocket 廣播）：**
+```python
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [(REDIS_HOST, REDIS_PORT)]},
+    }
+}
+```
+
+**連接追蹤（SET）：**
+```
+Key: ws:connections:user:{user_id}
+Type: SET
+Members: [channel_name_1, channel_name_2, ...]
+```
+- Lua 腳本確保原子性
+- 連接斷開時自動清理
+
+**速率限制（Sorted Set）：**
+```
+Key: ws:ratelimit:user:{user_id}:doc:{document_id}
+Type: SORTED SET
+Score: timestamp
+```
+- 滑動窗口算法，無需定期清理
+- 自動過期機制（窗口 × 2）
 
 ---
 

@@ -82,8 +82,13 @@ class TestWebSocketConnection:
         )
 
         connected, _ = await communicator.connect()
-        # 連接應該被關閉或拒絕
-        assert connected is False or await communicator.receive_nothing(timeout=0.5)
+        # 連接會先被接受，然後發送錯誤消息並關閉
+        assert connected is True
+
+        # 應該收到權限錯誤消息
+        response = await communicator.receive_json_from(timeout=2)
+        assert response['type'] == 'connection_error'
+        assert response['error_code'] == 'PERMISSION_DENIED'
 
         await communicator.disconnect()
 
@@ -100,8 +105,13 @@ class TestWebSocketConnection:
         )
 
         connected, _ = await communicator.connect()
-        # 連接應該被關閉或拒絕
-        assert connected is False or await communicator.receive_nothing(timeout=0.5)
+        # 連接會先被接受，然後發送錯誤消息並關閉
+        assert connected is True
+
+        # 應該收到認證錯誤消息
+        response = await communicator.receive_json_from(timeout=2)
+        assert response['type'] == 'connection_error'
+        assert response['error_code'] == 'NO_TOKEN'
 
         await communicator.disconnect()
 

@@ -107,6 +107,34 @@ def jwt_token_for_third_user(third_user):
 
 
 @pytest.fixture
+def expired_jwt_token(test_user):
+    """生成已過期的 JWT token"""
+    import time
+    payload = {
+        'user_id': test_user.id,
+        'username': test_user.username,
+        'exp': int(time.time()) - 3600  # 1 小時前過期
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+
+
+@pytest.fixture
+def invalid_jwt_token():
+    """生成無效的 JWT token"""
+    return "invalid.token.here"
+
+
+@pytest.fixture
+def jwt_token_for_nonexistent_user():
+    """生成不存在用戶的 JWT token"""
+    payload = {
+        'user_id': 99999,
+        'username': 'nonexistent'
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+
+
+@pytest.fixture
 def websocket_application(settings):
     """
     WebSocket ASGI 應用，使用 InMemoryChannelLayer 避免 Redis 依賴
