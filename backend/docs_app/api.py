@@ -11,7 +11,7 @@ from ninja_extra.permissions import IsAuthenticated
 from django.contrib.auth.models import User
 from django.db.models import Q
 from channels.layers import get_channel_layer
-import asyncio
+from asgiref.sync import async_to_sync
 from .schemas import (
     UserSchema,
     ShareRequestSchema,
@@ -177,14 +177,12 @@ class DocumentController:
             logger.debug(f"廣播文檔 {document.id} 保存事件到頻道組 {room_group_name}")
 
             # 在同步上下文中運行異步的channel_layer.group_send
-            asyncio.run(
-                channel_layer.group_send(
-                    room_group_name,
-                    {
-                        "type": "doc_saved",
-                        "updated_at": document.updated_at.isoformat(),
-                    },
-                )
+            async_to_sync(channel_layer.group_send)(
+                room_group_name,
+                {
+                    "type": "doc_saved",
+                    "updated_at": document.updated_at.isoformat(),
+                },
             )
             logger.debug(f"成功廣播文檔 {document.id} 保存事件")
         except Exception as e:

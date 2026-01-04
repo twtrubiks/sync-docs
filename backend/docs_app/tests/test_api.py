@@ -1,5 +1,6 @@
 import json
 import pytest
+from unittest.mock import patch, MagicMock
 from docs_app.models import Document
 
 # 使用 pytest-django 的 db fixture 來確保資料庫在測試之間是乾淨的
@@ -221,6 +222,45 @@ def test_update_document(authenticated_client, create_user):
     document.refresh_from_db()
     assert document.title == updated_title
     assert document.content == updated_content
+
+
+def test_update_document_broadcasts_doc_saved(authenticated_client):
+    """測試更新文檔時會廣播 doc_saved 事件到 WebSocket 頻道組"""
+    client, user, access_token = authenticated_client
+
+    # 建立測試文檔
+    document = Document.objects.create(
+        owner=user,
+        title="Broadcast Test Doc",
+        content={"data": "original content"}
+    )
+
+    with patch('docs_app.api.get_channel_layer') as mock_get_channel_layer:
+        mock_channel_layer = MagicMock()
+        mock_get_channel_layer.return_value = mock_channel_layer
+
+        # 更新文檔
+        update_data = {"title": "Updated Title"}
+        response = client.put(
+            f"{DOCUMENTS_ENDPOINT}{document.id}/",
+            data=update_data,
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {access_token}"
+        )
+
+        assert response.status_code == 200, f"Update failed: {response.content.decode()}"
+
+        # 驗證 channel_layer.group_send 被調用
+        mock_channel_layer.group_send.assert_called_once()
+        call_args = mock_channel_layer.group_send.call_args[0]
+
+        # 驗證頻道組名稱正確
+        assert call_args[0] == f"doc_{document.id}"
+
+        # 驗證事件類型和內容
+        event = call_args[1]
+        assert event["type"] == "doc_saved"
+        assert "updated_at" in event
 
 
 def test_unauthorized_user_cannot_access_document(authenticated_client, create_user):
