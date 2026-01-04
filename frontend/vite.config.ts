@@ -9,7 +9,7 @@ export default defineConfig({
 		proxy: {
 			'/api': {
 				target: 'http://backend:8000', // 如果是使用非 docker, 記得調整這邊
-				changeOrigin: true,
+				changeOrigin: true
 			}
 		}
 	},

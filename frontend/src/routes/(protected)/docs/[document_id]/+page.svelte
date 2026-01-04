@@ -3,22 +3,48 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import QuillEditor from '$lib/components/QuillEditor.svelte';
-	import { get, put, del, post, type User } from '$lib/auth';
+	import { get, put, del, post, logout, type User } from '$lib/auth';
 	import { toast } from '@zerodevx/svelte-toast';
+	import type { QuillDelta, QuillType } from '$lib/types/quill';
+
+	// WebSocket Close Codes（與後端對應）
+	const WS_CLOSE_CODES = {
+		AUTH_FAILED: 4001,
+		TOKEN_EXPIRED: 4002,
+		PERMISSION_DENIED: 4003,
+		DOCUMENT_NOT_FOUND: 4004,
+		TOO_MANY_CONNECTIONS: 4005,
+		INVALID_MESSAGE: 4006,
+		MESSAGE_TOO_LARGE: 4007,
+		RATE_LIMITED: 4008
+	} as const;
+
+	// Toast 主題
+	const errorTheme = {
+		'--toastBackground': '#F56565',
+		'--toastColor': 'white',
+		'--toastBarBackground': '#C53030'
+	};
+
+	const warningTheme = {
+		'--toastBackground': '#ED8936',
+		'--toastColor': 'white',
+		'--toastBarBackground': '#C05621'
+	};
 
 	// Svelte 5: $page store auto-subscription still works
 	const documentId = $page.params.document_id;
 
 	// Svelte 5 Runes: use $state() for reactive state
 	let title = $state('');
-	let content: any = $state({}); // Quill's content can be an object (Delta)
-	let editor: any = $state(null); // To hold the Quill instance
+	let content: QuillDelta = $state({ ops: [] }); // Quill's content (Delta format)
+	let editor: QuillType | undefined = $state(undefined); // To hold the Quill instance
 	let socket: WebSocket | null = $state(null);
-	let owner: { username: string } | null = $state(null);
 	let isOwner = $state(false);
 	let lastSavedTime: string | null = $state(null);
-	let saveStatus: 'idle' | 'unsaved' | 'saving' | 'saved' | 'error' | 'connecting' = $state('connecting');
-	let debounceTimeout: ReturnType<typeof setTimeout> | null = $state(null);
+	let saveStatus: 'idle' | 'unsaved' | 'saving' | 'saved' | 'error' | 'connecting' =
+		$state('connecting');
+	let debounceTimeout: ReturnType<typeof setTimeout> | undefined = $state(undefined);
 
 	// State for sharing modal
 	let showShareModal = $state(false);
@@ -59,9 +85,10 @@
 					'--toastBarBackground': '#2F855A'
 				}
 			});
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Failed to add collaborator:', error);
-			toast.push(error.message || 'Failed to add collaborator.', {
+			const message = error instanceof Error ? error.message : 'Failed to add collaborator.';
+			toast.push(message, {
 				theme: {
 					'--toastBackground': '#F56565',
 					'--toastColor': 'white',
@@ -134,15 +161,47 @@
 		}
 	});
 
+	/**
+	 * 處理 WebSocket 錯誤
+	 * 根據 close code 顯示對應的錯誤訊息並執行相應操作
+	 */
+	function handleWsError(code: number, message?: string) {
+		switch (code) {
+			case WS_CLOSE_CODES.TOKEN_EXPIRED:
+			case WS_CLOSE_CODES.AUTH_FAILED:
+				toast.push('Session expired. Please login again.', { theme: errorTheme });
+				logout();
+				goto('/login');
+				break;
+			case WS_CLOSE_CODES.PERMISSION_DENIED:
+				toast.push(message || 'You do not have permission to access this document.', {
+					theme: errorTheme
+				});
+				goto('/dashboard');
+				break;
+			case WS_CLOSE_CODES.DOCUMENT_NOT_FOUND:
+				toast.push('Document not found.', { theme: errorTheme });
+				goto('/dashboard');
+				break;
+			case WS_CLOSE_CODES.TOO_MANY_CONNECTIONS:
+				toast.push('Too many open tabs. Please close some and refresh.', { theme: errorTheme });
+				break;
+			case WS_CLOSE_CODES.RATE_LIMITED:
+				toast.push('Sending too fast. Please slow down.', { theme: warningTheme });
+				break;
+			default:
+				toast.push(message || 'Connection lost. Please refresh the page.', { theme: errorTheme });
+		}
+	}
+
 	onMount(async () => {
 		try {
 			const doc = await get(`/documents/${documentId}/`);
 			title = doc.title;
-			owner = doc.owner;
 			isOwner = doc.is_owner === true; // Strict check
 			lastSavedTime = doc.updated_at;
-			if (Object.keys(content).length === 0) {
-				content = doc.content || {};
+			if (content.ops.length === 0) {
+				content = doc.content || { ops: [] };
 			}
 
 			const token = localStorage.getItem('access_token');
@@ -163,29 +222,52 @@
 
 			socket.onmessage = (event) => {
 				const data = JSON.parse(event.data);
-				if (data.type === 'doc_update' && data.delta && editor) {
-					editor.updateContents(data.delta, 'silent');
-				} else if (data.type === 'doc_saved' && data.updated_at) {
-					lastSavedTime = data.updated_at;
-					if (saveStatus === 'saving') {
-						saveStatus = 'saved';
-						setTimeout(() => {
-							if (saveStatus === 'saved') saveStatus = 'idle';
-						}, 2000);
-					}
+
+				switch (data.type) {
+					case 'doc_update':
+						if (data.delta && editor) {
+							editor.updateContents(data.delta, 'silent');
+						}
+						break;
+					case 'doc_saved':
+						if (data.updated_at) {
+							lastSavedTime = data.updated_at;
+							if (saveStatus === 'saving') {
+								saveStatus = 'saved';
+								setTimeout(() => {
+									if (saveStatus === 'saved') saveStatus = 'idle';
+								}, 2000);
+							}
+						}
+						break;
+					case 'connection_error':
+						// 連接錯誤會在 onclose 之前收到，記錄到 console
+						console.warn('WebSocket connection error:', data.error_code, data.message);
+						break;
+					case 'error':
+						// 運行時錯誤（如 RATE_LIMITED）- 連接保持
+						if (data.error_code === 'RATE_LIMITED' && data.retry_after) {
+							toast.push(`Too fast! Wait ${Math.ceil(data.retry_after)}s`, {
+								theme: warningTheme
+							});
+						} else {
+							toast.push(data.message || 'An error occurred.', { theme: errorTheme });
+						}
+						break;
 				}
 			};
 
-			socket.onclose = () => {
-				console.log('WebSocket connection closed');
+			socket.onclose = (event) => {
+				console.log('WebSocket closed:', event.code, event.reason);
 				saveStatus = 'error';
-				toast.push('Connection lost. Please refresh the page.', {
-					theme: {
-						'--toastBackground': '#F56565',
-						'--toastColor': 'white',
-						'--toastBarBackground': '#C53030'
-					}
-				});
+
+				// 根據 close code 處理
+				if (event.code >= 4001 && event.code <= 4008) {
+					handleWsError(event.code, event.reason);
+				} else if (event.code !== 1000 && event.code !== 1001) {
+					// 非正常關閉（1000=正常, 1001=離開頁面）
+					toast.push('Connection lost. Please refresh the page.', { theme: errorTheme });
+				}
 			};
 
 			socket.onerror = (error) => {
@@ -249,7 +331,7 @@
 	}
 
 	// Svelte 5: Updated handler signature for callback prop (no more CustomEvent)
-	function handleContentChange(detail: { delta: any; source: string }) {
+	function handleContentChange(detail: { delta: QuillDelta; source: string }) {
 		const { delta, source } = detail;
 		if (source !== 'user') return;
 
@@ -274,7 +356,12 @@
 <div class="page-container">
 	<header class="header">
 		<div class="header-left">
-			<a href="/dashboard" class="logo-link" title="Back to Dashboard">
+			<a
+				href="/dashboard"
+				class="logo-link"
+				title="Back to Dashboard"
+				aria-label="Back to Dashboard"
+			>
 				<svg
 					class="logo-icon"
 					fill="currentColor"
@@ -298,10 +385,7 @@
 		</div>
 		<div class="header-right">
 			{#if isOwner}
-				<button
-					onclick={() => (showShareModal = true)}
-					class="share-button"
-				>
+				<button onclick={() => (showShareModal = true)} class="share-button">
 					<svg
 						class="share-icon"
 						fill="currentColor"
@@ -390,9 +474,7 @@
 				>
 					Cancel
 				</button>
-				<button onclick={confirmRemoveCollaborator} class="confirm-remove-button">
-					Remove
-				</button>
+				<button onclick={confirmRemoveCollaborator} class="confirm-remove-button"> Remove </button>
 			</div>
 		</div>
 	</div>
@@ -512,7 +594,9 @@
 		min-height: 100%;
 		margin: 0 auto;
 		background-color: white;
-		box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); /* shadow-2xl */
+		box-shadow:
+			0 20px 25px -5px rgba(0, 0, 0, 0.1),
+			0 10px 10px -5px rgba(0, 0, 0, 0.04); /* shadow-2xl */
 		border-radius: 0.5rem; /* rounded-lg */
 		padding: 4rem;
 		border: 1px solid #e2e8f0; /* border */
@@ -531,7 +615,9 @@
 	.modal-content {
 		background-color: white;
 		border-radius: 0.5rem; /* rounded-lg */
-		box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); /* shadow-xl */
+		box-shadow:
+			0 20px 25px -5px rgba(0, 0, 0, 0.1),
+			0 10px 10px -5px rgba(0, 0, 0, 0.04); /* shadow-xl */
 		padding: 1.5rem;
 		width: 100%;
 		max-width: 32rem; /* max-w-md */
