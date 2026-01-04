@@ -799,10 +799,12 @@
 	/* Permission select dropdown */
 	.permission-select {
 		padding: 0.5rem;
+		padding-right: 1.5rem;
 		border: 1px solid #d2d6dc;
 		border-radius: 0.375rem;
 		background-color: white;
 		cursor: pointer;
+		min-width: 115px;
 	}
 	.permission-select:focus {
 		box-shadow: 0 0 0 2px #63b3ed;
