@@ -12,11 +12,13 @@
 	let {
 		value = $bindable({ ops: [] }),
 		editor = $bindable(),
-		onTextChange
+		onTextChange,
+		disabled = false
 	}: {
 		value?: QuillDelta;
 		editor?: QuillType;
 		onTextChange?: (detail: { delta: QuillDelta; source: string }) => void;
+		disabled?: boolean;
 	} = $props();
 
 	onMount(async () => {
@@ -63,6 +65,13 @@
 			if (JSON.stringify(value) !== JSON.stringify(editor.getContents())) {
 				editor.setContents(value.ops, 'silent');
 			}
+		}
+	});
+
+	// Handle disabled prop changes
+	$effect(() => {
+		if (editor) {
+			editor.enable(!disabled);
 		}
 	});
 </script>

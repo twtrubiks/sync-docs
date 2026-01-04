@@ -8,6 +8,8 @@
 		title: string;
 		is_owner: boolean;
 		owner: User;
+		permission: 'read' | 'write' | null; // User's permission level for shared docs
+		can_write: boolean; // Whether user can edit
 	}
 
 	// Svelte 5 Runes: use $state() for reactive state
@@ -66,6 +68,15 @@
 					>
 					<div class="flex items-center">
 						<span class="mr-4 text-sm text-gray-500">Owner: {doc.owner.username}</span>
+						{#if !doc.is_owner && doc.permission}
+							<span
+								class="mr-4 rounded px-2 py-0.5 text-xs font-medium {doc.permission === 'write'
+									? 'bg-green-100 text-green-800'
+									: 'bg-indigo-100 text-indigo-800'}"
+							>
+								{doc.permission === 'write' ? 'Can Edit' : 'View Only'}
+							</span>
+						{/if}
 						{#if doc.is_owner}
 							<!-- Svelte 5: onclick with manual stopPropagation and preventDefault -->
 							<button

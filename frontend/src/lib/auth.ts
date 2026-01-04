@@ -9,6 +9,14 @@ export interface User {
 	email: string | null;
 }
 
+// Collaborator interface (includes permission level)
+export interface Collaborator {
+	id: number;
+	username: string;
+	email: string | null;
+	permission: 'read' | 'write';
+}
+
 // Create a writable store with an initial value from localStorage if in browser
 const initialToken = browser ? window.localStorage.getItem('access_token') : null;
 export const token = writable<string | null>(initialToken);

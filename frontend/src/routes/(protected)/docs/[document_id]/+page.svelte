@@ -3,7 +3,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import QuillEditor from '$lib/components/QuillEditor.svelte';
-	import { get, put, del, post, logout, type User } from '$lib/auth';
+	import { get, put, del, post, logout, type User, type Collaborator } from '$lib/auth';
 	import { toast } from '@zerodevx/svelte-toast';
 	import type { QuillDelta, QuillType } from '$lib/types/quill';
 
@@ -46,14 +46,18 @@
 		$state('connecting');
 	let debounceTimeout: ReturnType<typeof setTimeout> | undefined = $state(undefined);
 
+	// Permission state (from API and WebSocket)
+	let canWrite = $state(true);
+
 	// State for sharing modal
 	let showShareModal = $state(false);
-	let collaborators: User[] = $state([]);
+	let collaborators: Collaborator[] = $state([]);
 	let newCollaboratorUsername = $state('');
+	let newCollaboratorPermission = $state<'read' | 'write'>('write');
 
 	// State for remove confirmation modal
 	let showRemoveConfirmModal = $state(false);
-	let collaboratorToRemove: User | null = $state(null);
+	let collaboratorToRemove: Collaborator | null = $state(null);
 
 	async function getCollaborators() {
 		try {
@@ -74,10 +78,12 @@
 		if (!newCollaboratorUsername) return;
 		try {
 			const newCollaborator = await post(`/documents/${documentId}/collaborators/`, {
-				username: newCollaboratorUsername
+				username: newCollaboratorUsername,
+				permission: newCollaboratorPermission
 			});
 			collaborators = [...collaborators, newCollaborator];
 			newCollaboratorUsername = ''; // Clear input
+			newCollaboratorPermission = 'write'; // Reset to default
 			toast.push(`Successfully added ${newCollaborator.username} as a collaborator.`, {
 				theme: {
 					'--toastBackground': '#48BB78',
@@ -98,7 +104,7 @@
 		}
 	}
 
-	function openRemoveConfirm(collaborator: User) {
+	function openRemoveConfirm(collaborator: Collaborator) {
 		collaboratorToRemove = collaborator;
 		showRemoveConfirmModal = true;
 	}
@@ -199,6 +205,7 @@
 			const doc = await get(`/documents/${documentId}/`);
 			title = doc.title;
 			isOwner = doc.is_owner === true; // Strict check
+			canWrite = doc.can_write !== false; // Get initial permission from API
 			lastSavedTime = doc.updated_at;
 			if (content.ops.length === 0) {
 				content = doc.content || { ops: [] };
@@ -224,6 +231,11 @@
 				const data = JSON.parse(event.data);
 
 				switch (data.type) {
+					case 'connection_success':
+						// Update permission from WebSocket connection
+						canWrite = data.can_write;
+						console.log(`WebSocket connected, can_write: ${canWrite}`);
+						break;
 					case 'doc_update':
 						if (data.delta && editor) {
 							editor.updateContents(data.delta, 'silent');
@@ -245,9 +257,13 @@
 						console.warn('WebSocket connection error:', data.error_code, data.message);
 						break;
 					case 'error':
-						// 運行時錯誤（如 RATE_LIMITED）- 連接保持
+						// 運行時錯誤（如 RATE_LIMITED, READ_ONLY）- 連接保持
 						if (data.error_code === 'RATE_LIMITED' && data.retry_after) {
 							toast.push(`Too fast! Wait ${Math.ceil(data.retry_after)}s`, {
+								theme: warningTheme
+							});
+						} else if (data.error_code === 'READ_ONLY') {
+							toast.push('You have read-only access to this document.', {
 								theme: warningTheme
 							});
 						} else {
@@ -373,13 +389,19 @@
 				>
 			</a>
 			<div class="doc-info">
-				<input
-					type="text"
-					bind:value={title}
-					oninput={debouncedSave}
-					class="doc-title-input"
-					placeholder="Untitled Document"
-				/>
+				<div class="title-row">
+					<input
+						type="text"
+						bind:value={title}
+						oninput={debouncedSave}
+						class="doc-title-input"
+						placeholder="Untitled Document"
+						disabled={!canWrite}
+					/>
+					{#if !canWrite}
+						<span class="read-only-badge">View Only</span>
+					{/if}
+				</div>
 				<div class="doc-status">{statusText}</div>
 			</div>
 		</div>
@@ -407,7 +429,12 @@
 	<main class="main-content">
 		<div class="editor-wrapper">
 			<!-- Svelte 5: Use onTextChange callback prop instead of on:text-change event -->
-			<QuillEditor bind:value={content} bind:editor onTextChange={handleContentChange} />
+			<QuillEditor
+				bind:value={content}
+				bind:editor
+				onTextChange={handleContentChange}
+				disabled={!canWrite}
+			/>
 		</div>
 	</main>
 </div>
@@ -426,6 +453,10 @@
 						placeholder="Enter username"
 						class="collaborator-input"
 					/>
+					<select bind:value={newCollaboratorPermission} class="permission-select">
+						<option value="write">Can Edit</option>
+						<option value="read">View Only</option>
+					</select>
 					<button onclick={handleAddCollaborator} class="add-button">Add</button>
 				</div>
 			{/if}
@@ -434,9 +465,12 @@
 			<ul class="collaborators-list">
 				{#each collaborators as collaborator (collaborator.id)}
 					<li class="collaborator-item">
-						<div>
+						<div class="collaborator-info">
 							<span>{collaborator.username}</span>
 							<span class="collaborator-email">({collaborator.email})</span>
+							<span class="permission-badge {collaborator.permission}">
+								{collaborator.permission === 'write' ? 'Can Edit' : 'View Only'}
+							</span>
 						</div>
 						{#if isOwner}
 							<button onclick={() => openRemoveConfirm(collaborator)} class="remove-button"
@@ -736,5 +770,69 @@
 	}
 	.confirm-remove-button:hover {
 		background-color: #c53030; /* red-700 */
+	}
+
+	/* Title row with read-only badge */
+	.title-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	/* Read-only badge */
+	.read-only-badge {
+		background-color: #fef3c7; /* amber-100 */
+		color: #92400e; /* amber-800 */
+		padding: 2px 8px;
+		border-radius: 4px;
+		font-size: 12px;
+		font-weight: 500;
+		white-space: nowrap;
+	}
+
+	/* Disabled title input */
+	.doc-title-input:disabled {
+		cursor: not-allowed;
+		opacity: 0.7;
+	}
+
+	/* Permission select dropdown */
+	.permission-select {
+		padding: 0.5rem;
+		border: 1px solid #d2d6dc;
+		border-radius: 0.375rem;
+		background-color: white;
+		cursor: pointer;
+	}
+	.permission-select:focus {
+		box-shadow: 0 0 0 2px #63b3ed;
+		border-color: #4299e1;
+	}
+
+	/* Collaborator info container */
+	.collaborator-info {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+	}
+
+	/* Permission badges in collaborator list */
+	.permission-badge {
+		padding: 2px 6px;
+		border-radius: 4px;
+		font-size: 11px;
+		font-weight: 500;
+		margin-left: 0.5rem;
+	}
+
+	.permission-badge.write {
+		background-color: #d1fae5; /* green-100 */
+		color: #065f46; /* green-800 */
+	}
+
+	.permission-badge.read {
+		background-color: #e0e7ff; /* indigo-100 */
+		color: #3730a3; /* indigo-800 */
 	}
 </style>
