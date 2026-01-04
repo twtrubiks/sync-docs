@@ -20,6 +20,18 @@ pytestmark = [
 ]
 
 
+async def consume_connection_success(communicator, timeout=2):
+    """
+    消費並驗證 connection_success 訊息
+
+    連接成功後，伺服器會發送 connection_success 訊息，
+    測試需要先消費這個訊息才能進行後續操作。
+    """
+    response = await communicator.receive_json_from(timeout=timeout)
+    assert response['type'] == 'connection_success'
+    return response
+
+
 class TestWebSocketConnection:
     """
     測試 WebSocket 連接場景
@@ -116,6 +128,106 @@ class TestWebSocketConnection:
         await communicator.disconnect()
 
 
+class TestWebSocketReadOnlyPermission:
+    """
+    測試 WebSocket 只讀權限場景
+
+    驗證只讀用戶可以連接但無法編輯。
+    """
+
+    async def test_read_only_user_cannot_send_delta(
+        self,
+        websocket_application,
+        read_only_shared_document,
+        jwt_token_for_user,
+        jwt_token_for_read_only_user
+    ):
+        """測試只讀用戶發送 delta 會被拒絕"""
+        # 擁有者連接
+        comm_owner = WebsocketCommunicator(
+            websocket_application,
+            f"/ws/docs/{read_only_shared_document.id}/",
+            subprotocols=[f"access_token.{jwt_token_for_user}"]
+        )
+
+        # 只讀用戶連接
+        comm_read_only = WebsocketCommunicator(
+            websocket_application,
+            f"/ws/docs/{read_only_shared_document.id}/",
+            subprotocols=[f"access_token.{jwt_token_for_read_only_user}"]
+        )
+
+        try:
+            await comm_owner.connect()
+            await comm_read_only.connect()
+
+            # 消費 connection_success
+            owner_response = await consume_connection_success(comm_owner)
+            read_only_response = await consume_connection_success(comm_read_only)
+
+            # 驗證只讀用戶 can_write=False
+            assert owner_response['can_write'] is True
+            assert read_only_response['can_write'] is False
+
+            # 只讀用戶嘗試發送 delta
+            await comm_read_only.send_json_to({
+                "delta": {"ops": [{"insert": "test"}]}
+            })
+
+            # 應該收到 READ_ONLY 錯誤
+            error_response = await comm_read_only.receive_json_from(timeout=2)
+            assert error_response['type'] == 'error'
+            assert error_response['error_code'] == 'READ_ONLY'
+
+        finally:
+            await comm_owner.disconnect()
+            await comm_read_only.disconnect()
+
+    async def test_read_only_user_receives_broadcast(
+        self,
+        websocket_application,
+        read_only_shared_document,
+        jwt_token_for_user,
+        jwt_token_for_read_only_user
+    ):
+        """測試只讀用戶可以接收其他用戶的廣播"""
+        # 擁有者連接
+        comm_owner = WebsocketCommunicator(
+            websocket_application,
+            f"/ws/docs/{read_only_shared_document.id}/",
+            subprotocols=[f"access_token.{jwt_token_for_user}"]
+        )
+
+        # 只讀用戶連接
+        comm_read_only = WebsocketCommunicator(
+            websocket_application,
+            f"/ws/docs/{read_only_shared_document.id}/",
+            subprotocols=[f"access_token.{jwt_token_for_read_only_user}"]
+        )
+
+        try:
+            await comm_owner.connect()
+            await comm_read_only.connect()
+
+            # 消費 connection_success
+            await consume_connection_success(comm_owner)
+            await consume_connection_success(comm_read_only)
+
+            # 擁有者發送 delta
+            await comm_owner.send_json_to({
+                "delta": {"ops": [{"insert": "Hello from owner"}]}
+            })
+
+            # 只讀用戶應該收到廣播
+            response = await comm_read_only.receive_json_from(timeout=2)
+            assert response['type'] == 'doc_update'
+            assert response['delta']['ops'][0]['insert'] == 'Hello from owner'
+
+        finally:
+            await comm_owner.disconnect()
+            await comm_read_only.disconnect()
+
+
 class TestWebSocketBroadcast:
     """
     測試 WebSocket 廣播功能
@@ -152,6 +264,10 @@ class TestWebSocketBroadcast:
 
             assert connected_owner is True
             assert connected_collaborator is True
+
+            # 消費 connection_success 訊息
+            await consume_connection_success(comm_owner)
+            await consume_connection_success(comm_collaborator)
 
             # 擁有者發送 delta
             delta_message = {
@@ -196,6 +312,10 @@ class TestWebSocketBroadcast:
         try:
             await comm_owner.connect()
             await comm_collaborator.connect()
+
+            # 消費 connection_success 訊息
+            await consume_connection_success(comm_owner)
+            await consume_connection_success(comm_collaborator)
 
             # 擁有者發送 delta
             delta_message = {
@@ -247,6 +367,11 @@ class TestWebSocketBroadcast:
             await comm_1.connect()
             await comm_2.connect()
             await comm_3.connect()
+
+            # 消費 connection_success 訊息
+            await consume_connection_success(comm_1)
+            await consume_connection_success(comm_2)
+            await consume_connection_success(comm_3)
 
             # 客戶端 1 發送
             delta_message = {
@@ -304,6 +429,10 @@ class TestWebSocketConcurrency:
         try:
             await comm_sender.connect()
             await comm_receiver.connect()
+
+            # 消費 connection_success 訊息
+            await consume_connection_success(comm_sender)
+            await consume_connection_success(comm_receiver)
 
             # 快速發送 10 個消息
             num_messages = 10
@@ -398,6 +527,10 @@ class TestWebSocketUnicode:
             await comm_sender.connect()
             await comm_receiver.connect()
 
+            # 消費 connection_success 訊息
+            await consume_connection_success(comm_sender)
+            await consume_connection_success(comm_receiver)
+
             # 發送包含中文和 emoji 的消息
             unicode_text = "Hello 世界! 你好 🎉🚀💻 繁體中文測試"
             await comm_sender.send_json_to({
@@ -437,6 +570,10 @@ class TestWebSocketUnicode:
         try:
             await comm_sender.connect()
             await comm_receiver.connect()
+
+            # 消費 connection_success 訊息
+            await consume_connection_success(comm_sender)
+            await consume_connection_success(comm_receiver)
 
             # 發送包含特殊符號的消息
             special_text = "Symbols: ©®™ <script> &nbsp; \"quotes\" 'apostrophe' \t\n"

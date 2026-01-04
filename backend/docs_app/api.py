@@ -4,7 +4,7 @@ from ninja_extra import api_controller, http_get, http_post, http_put, http_dele
 from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
 from django.http import Http404
-from .models import Document
+from .models import Document, DocumentCollaborator, PermissionLevel
 from typing import List
 from ninja_jwt.authentication import JWTAuth
 from ninja_extra.permissions import IsAuthenticated
@@ -15,6 +15,8 @@ from asgiref.sync import async_to_sync
 from .schemas import (
     UserSchema,
     ShareRequestSchema,
+    CollaboratorSchema,
+    UpdateCollaboratorPermissionSchema,
     DocumentListSchema,
     DocumentSchema,
     DocumentCreateSchema,
@@ -31,54 +33,83 @@ class DocumentController:
         """
         返回用戶可以訪問的文檔查詢條件（擁有或被分享的文檔）
         """
-        return Q(owner=user) | Q(shared_with=user)
+        return Q(owner=user) | Q(collaborators__user=user)
 
-    def _get_document_with_permission_check(self, document_id, user, owner_only=False):
+    def _get_document_with_permission_check(self, document_id, user, require_write=False, owner_only=False):
         """
-        獲取文檔並檢查權限，如果沒有權限則拋出404
+        獲取文檔並檢查權限，如果沒有權限則拋出404或403
 
         Args:
             document_id: 文檔ID
             user: 當前用戶
+            require_write: 是否要求寫入權限
             owner_only: 是否只允許擁有者訪問
 
         Returns:
-            Document: 文檔對象，已設置is_owner屬性
+            Document: 文檔對象，已設置 is_owner、permission、can_write 屬性
         """
         try:
-            if owner_only:
-                query = Q(owner=user)
-                logger.debug(f"用戶 {user.username} 嘗試以擁有者身份訪問文檔 {document_id}")
-            else:
-                query = self._get_user_accessible_documents_query(user)
-                logger.debug(f"用戶 {user.username} 嘗試訪問文檔 {document_id}")
+            document = Document.objects.select_related('owner').get(id=document_id)
+        except Document.DoesNotExist:
+            logger.warning(f"用戶 {user.username} 訪問不存在的文檔 {document_id}")
+            raise Http404("Document not found")
 
-            document = Document.objects.select_related('owner').filter(
-                Q(id=document_id) & query
-            ).distinct().first()
-
-            if document is None:
-                raise Http404("Document not found")
-
-            # 動態設置is_owner標誌
-            document.is_owner = (document.owner == user)
-            logger.info(f"用戶 {user.username} 成功訪問文檔 {document_id}")
+        # 檢查是否是擁有者
+        if document.owner == user:
+            document.is_owner = True
+            document.permission = 'owner'
+            document.can_write = True
+            logger.info(f"用戶 {user.username} 以擁有者身份訪問文檔 {document_id}")
             return document
 
-        except Exception as e:
-            logger.warning(f"用戶 {user.username} 訪問文檔 {document_id} 失敗: {str(e)}")
-            raise
+        # owner_only 模式：非擁有者不能訪問
+        if owner_only:
+            logger.warning(f"用戶 {user.username} 嘗試以擁有者身份訪問文檔 {document_id} 但不是擁有者")
+            raise Http404("Document not found")
 
-    def _set_is_owner_flag(self, documents, user):
+        # 檢查協作者權限
+        collab = document.collaborators.filter(user=user).first()
+        if not collab:
+            logger.warning(f"用戶 {user.username} 無權限訪問文檔 {document_id}")
+            raise Http404("Document not found")
+
+        # 需要寫入權限但只有讀取權限
+        if require_write and collab.permission != PermissionLevel.WRITE:
+            logger.warning(f"只讀用戶 {user.username} 嘗試編輯文檔 {document_id}")
+            raise HttpError(403, "You do not have permission to edit this document")
+
+        document.is_owner = False
+        document.permission = collab.permission
+        document.can_write = (collab.permission == PermissionLevel.WRITE)
+        logger.info(f"用戶 {user.username} 以協作者身份訪問文檔 {document_id} (權限: {collab.permission})")
+        return document
+
+    def _set_document_permissions(self, documents, user):
         """
-        為文檔列表設置is_owner標誌
+        為文檔列表設置權限標誌
 
         Args:
             documents: 文檔查詢集或列表
             user: 當前用戶
         """
+        # 預先獲取用戶的所有協作關係
+        user_collaborations = {
+            collab.document_id: collab.permission
+            for collab in DocumentCollaborator.objects.filter(
+                user=user,
+                document__in=documents
+            )
+        }
+
         for doc in documents:
             doc.is_owner = (doc.owner == user)
+            if doc.is_owner:
+                doc.permission = 'owner'
+                doc.can_write = True
+            else:
+                permission = user_collaborations.get(doc.id)
+                doc.permission = permission
+                doc.can_write = (permission == PermissionLevel.WRITE)
 
     @http_post("/", response=DocumentSchema)
     def create_document(self, payload: DocumentCreateSchema):
@@ -99,6 +130,8 @@ class DocumentController:
                 owner=user
             )
             document.is_owner = True  # 創建者始終是擁有者
+            document.permission = 'owner'
+            document.can_write = True
             logger.info(f"用戶 {user.username} 成功創建文檔 {document.id}: {document.title}")
             return document
         except Exception as e:
@@ -111,14 +144,14 @@ class DocumentController:
         獲取用戶擁有或被分享的文檔列表
 
         Returns:
-            List[DocumentListSchema]: 文檔列表，包含基本信息和擁有者標誌
+            List[DocumentListSchema]: 文檔列表，包含基本信息和權限標誌
         """
         user = self.context.request.auth
         query = self._get_user_accessible_documents_query(user)
         documents = Document.objects.select_related('owner').filter(query).distinct()
 
-        # 為每個文檔設置is_owner標誌
-        self._set_is_owner_flag(documents, user)
+        # 為每個文檔設置權限標誌
+        self._set_document_permissions(documents, user)
 
         return documents
 
@@ -140,7 +173,7 @@ class DocumentController:
     @http_put("/{document_id}/", response=DocumentSchema)
     def update_document(self, document_id: uuid.UUID, payload: DocumentUpdateSchema):
         """
-        更新特定文檔（如果用戶有訪問權限）
+        更新特定文檔（需要編輯權限）
         同時向協作者廣播更新事件
 
         Args:
@@ -151,7 +184,10 @@ class DocumentController:
             DocumentSchema: 更新後的文檔信息
         """
         user = self.context.request.auth
-        document = self._get_document_with_permission_check(document_id, user)
+        # 關鍵修改：require_write=True
+        document = self._get_document_with_permission_check(
+            document_id, user, require_write=True
+        )
 
         # 更新文檔屬性
         for attr, value in payload.dict(exclude_unset=True).items():
@@ -204,7 +240,7 @@ class DocumentController:
         document.delete()
         return {"success": True}
 
-    @http_get("/{document_id}/collaborators/", response=List[UserSchema])
+    @http_get("/{document_id}/collaborators/", response=List[CollaboratorSchema])
     def get_collaborators(self, document_id: uuid.UUID):
         """
         獲取文檔的協作者列表（僅擁有者可以訪問）
@@ -213,23 +249,32 @@ class DocumentController:
             document_id: 文檔的UUID
 
         Returns:
-            List[UserSchema]: 協作者用戶列表
+            List[CollaboratorSchema]: 協作者列表，包含權限信息
         """
         user = self.context.request.auth
         document = self._get_document_with_permission_check(document_id, user, owner_only=True)
-        return document.shared_with.all()
 
-    @http_post("/{document_id}/collaborators/", response=UserSchema)
+        collaborators = []
+        for collab in document.collaborators.select_related('user').all():
+            collaborators.append({
+                'id': collab.user.id,
+                'username': collab.user.username,
+                'email': collab.user.email,
+                'permission': collab.permission,
+            })
+        return collaborators
+
+    @http_post("/{document_id}/collaborators/", response=CollaboratorSchema)
     def add_collaborator(self, document_id: uuid.UUID, payload: ShareRequestSchema):
         """
         為文檔添加協作者（僅擁有者可以添加）
 
         Args:
             document_id: 文檔的UUID
-            payload: 包含要添加用戶名的請求數據
+            payload: 包含要添加用戶名和權限的請求數據
 
         Returns:
-            UserSchema: 被添加的用戶信息
+            CollaboratorSchema: 被添加的協作者信息
         """
         user = self.context.request.auth
         document = self._get_document_with_permission_check(document_id, user, owner_only=True)
@@ -239,8 +284,61 @@ class DocumentController:
         if user_to_add.id == user.id:
             raise HttpError(400, "You cannot share a document with yourself.")
 
-        document.shared_with.add(user_to_add)
-        return user_to_add
+        # 檢查是否已存在，如果存在則更新權限
+        existing = document.collaborators.filter(user=user_to_add).first()
+        if existing:
+            existing.permission = payload.permission
+            existing.save()
+            collab = existing
+            logger.info(f"用戶 {user.username} 更新協作者 {user_to_add.username} 的權限為 {payload.permission}")
+        else:
+            collab = DocumentCollaborator.objects.create(
+                document=document,
+                user=user_to_add,
+                permission=payload.permission
+            )
+            logger.info(f"用戶 {user.username} 添加協作者 {user_to_add.username} (權限: {payload.permission})")
+
+        return {
+            'id': user_to_add.id,
+            'username': user_to_add.username,
+            'email': user_to_add.email,
+            'permission': collab.permission,
+        }
+
+    @http_put("/{document_id}/collaborators/{user_id}/", response=CollaboratorSchema)
+    def update_collaborator_permission(
+        self,
+        document_id: uuid.UUID,
+        user_id: int,
+        payload: UpdateCollaboratorPermissionSchema
+    ):
+        """
+        更新協作者的權限級別（僅擁有者可以更新）
+
+        Args:
+            document_id: 文檔的UUID
+            user_id: 要更新的用戶ID
+            payload: 包含新權限級別的請求數據
+
+        Returns:
+            CollaboratorSchema: 更新後的協作者信息
+        """
+        user = self.context.request.auth
+        document = self._get_document_with_permission_check(document_id, user, owner_only=True)
+
+        collab = get_object_or_404(DocumentCollaborator, document=document, user_id=user_id)
+        collab.permission = payload.permission
+        collab.save()
+
+        logger.info(f"用戶 {user.username} 更新協作者 {collab.user.username} 的權限為 {payload.permission}")
+
+        return {
+            'id': collab.user.id,
+            'username': collab.user.username,
+            'email': collab.user.email,
+            'permission': collab.permission,
+        }
 
     @http_delete("/{document_id}/collaborators/{user_id}/")
     def remove_collaborator(self, document_id: uuid.UUID, user_id: int):
@@ -256,6 +354,10 @@ class DocumentController:
         """
         user = self.context.request.auth
         document = self._get_document_with_permission_check(document_id, user, owner_only=True)
-        user_to_remove = get_object_or_404(User, id=user_id)
-        document.shared_with.remove(user_to_remove)
+
+        collab = get_object_or_404(DocumentCollaborator, document=document, user_id=user_id)
+        username = collab.user.username
+        collab.delete()
+
+        logger.info(f"用戶 {user.username} 移除協作者 {username}")
         return {"success": True}

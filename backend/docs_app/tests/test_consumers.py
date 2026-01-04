@@ -38,8 +38,8 @@ class TestDocConsumer:
         # 確保文檔擁有者是test_user
         assert shared_document.owner == test_user
 
-        # 確保another_user在shared_with中
-        assert another_user in shared_document.shared_with.all()
+        # 確保another_user是協作者
+        assert shared_document.collaborators.filter(user=another_user).exists()
 
         # 測試擁有者和協作者都能訪問
         assert shared_document.can_user_access(test_user) is True
@@ -72,6 +72,7 @@ class TestDocConsumerValidation:
         consumer.channel_layer = MagicMock()
         consumer.channel_layer.group_send = AsyncMock()
         consumer.send = AsyncMock()
+        consumer.can_write = True  # 設置編輯權限
         return consumer
 
     async def test_receive_invalid_json_returns_error(self, mock_consumer):

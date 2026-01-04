@@ -5,7 +5,7 @@
 
 import pytest
 from django.contrib.auth.models import User
-from docs_app.models import Document
+from docs_app.models import Document, DocumentCollaborator, PermissionLevel
 
 pytestmark = pytest.mark.django_db
 
@@ -51,7 +51,16 @@ class TestDocumentModel:
     def test_get_collaborators_count_with_collaborators(self, test_document, another_user, third_user):
         """測試有協作者時的協作者數量"""
         # 添加協作者
-        test_document.shared_with.add(another_user, third_user)
+        DocumentCollaborator.objects.create(
+            document=test_document,
+            user=another_user,
+            permission=PermissionLevel.WRITE
+        )
+        DocumentCollaborator.objects.create(
+            document=test_document,
+            user=third_user,
+            permission=PermissionLevel.READ
+        )
 
         count = test_document.get_collaborators_count()
         assert count == 2
@@ -59,16 +68,29 @@ class TestDocumentModel:
     def test_get_collaborators_count_after_removing_collaborator(self, test_document, another_user, third_user):
         """測試移除協作者後的協作者數量"""
         # 添加協作者
-        test_document.shared_with.add(another_user, third_user)
+        collab1 = DocumentCollaborator.objects.create(
+            document=test_document,
+            user=another_user,
+            permission=PermissionLevel.WRITE
+        )
+        DocumentCollaborator.objects.create(
+            document=test_document,
+            user=third_user,
+            permission=PermissionLevel.READ
+        )
         assert test_document.get_collaborators_count() == 2
 
         # 移除一個協作者
-        test_document.shared_with.remove(another_user)
+        collab1.delete()
         assert test_document.get_collaborators_count() == 1
 
     def test_is_shared_with_user_true(self, test_document, another_user):
         """測試文檔與用戶共享時返回True"""
-        test_document.shared_with.add(another_user)
+        DocumentCollaborator.objects.create(
+            document=test_document,
+            user=another_user,
+            permission=PermissionLevel.READ
+        )
 
         assert test_document.is_shared_with_user(another_user) is True
 
@@ -77,8 +99,8 @@ class TestDocumentModel:
         assert test_document.is_shared_with_user(another_user) is False
 
     def test_is_shared_with_user_owner(self, test_document):
-        """測試文檔擁有者不在shared_with中時返回False"""
-        # 擁有者不應該在shared_with中，這個方法只檢查shared_with
+        """測試文檔擁有者不在collaborators中時返回False"""
+        # 擁有者不應該在collaborators中，這個方法只檢查collaborators
         assert test_document.is_shared_with_user(test_document.owner) is False
 
     def test_can_user_access_owner(self, test_document):
@@ -87,7 +109,11 @@ class TestDocumentModel:
 
     def test_can_user_access_collaborator(self, test_document, another_user):
         """測試協作者可以訪問文檔"""
-        test_document.shared_with.add(another_user)
+        DocumentCollaborator.objects.create(
+            document=test_document,
+            user=another_user,
+            permission=PermissionLevel.READ
+        )
 
         assert test_document.can_user_access(another_user) is True
 
@@ -97,7 +123,16 @@ class TestDocumentModel:
 
     def test_can_user_access_multiple_collaborators(self, test_document, another_user, third_user):
         """測試多個協作者都可以訪問文檔"""
-        test_document.shared_with.add(another_user, third_user)
+        DocumentCollaborator.objects.create(
+            document=test_document,
+            user=another_user,
+            permission=PermissionLevel.WRITE
+        )
+        DocumentCollaborator.objects.create(
+            document=test_document,
+            user=third_user,
+            permission=PermissionLevel.READ
+        )
 
         assert test_document.can_user_access(test_document.owner) is True
         assert test_document.can_user_access(another_user) is True
@@ -145,22 +180,34 @@ class TestDocumentModel:
         assert ['owner', '-updated_at'] in index_fields
         assert ['-created_at'] in index_fields
 
-    def test_document_shared_with_relationship(self, test_document, another_user, third_user):
-        """測試shared_with多對多關係"""
+    def test_document_collaborator_relationship(self, test_document, another_user, third_user):
+        """測試DocumentCollaborator關係"""
         # 測試添加協作者
-        test_document.shared_with.add(another_user)
-        assert another_user in test_document.shared_with.all()
+        collab1 = DocumentCollaborator.objects.create(
+            document=test_document,
+            user=another_user,
+            permission=PermissionLevel.WRITE
+        )
+        assert test_document.collaborators.filter(user=another_user).exists()
 
         # 測試添加多個協作者
-        test_document.shared_with.add(third_user)
-        collaborators = test_document.shared_with.all()
-        assert another_user in collaborators
-        assert third_user in collaborators
-        assert len(collaborators) == 2
+        collab2 = DocumentCollaborator.objects.create(
+            document=test_document,
+            user=third_user,
+            permission=PermissionLevel.READ
+        )
+        collaborators = test_document.collaborators.all()
+        assert collaborators.filter(user=another_user).exists()
+        assert collaborators.filter(user=third_user).exists()
+        assert collaborators.count() == 2
+
+        # 測試權限級別
+        assert collab1.permission == PermissionLevel.WRITE
+        assert collab2.permission == PermissionLevel.READ
 
         # 測試反向關係
-        shared_docs = another_user.shared_documents.all()
-        assert test_document in shared_docs
+        shared_docs = another_user.document_collaborations.all()
+        assert shared_docs.filter(document=test_document).exists()
 
     def test_document_owner_relationship(self, test_user):
         """測試owner外鍵關係"""
@@ -245,3 +292,59 @@ class TestDocumentModel:
         # 創建時間不應該改變，更新時間應該改變
         assert document.created_at == created_at
         assert document.updated_at > updated_at
+
+    def test_can_user_write_owner(self, test_document):
+        """測試文檔擁有者可以編輯文檔"""
+        assert test_document.can_user_write(test_document.owner) is True
+
+    def test_can_user_write_write_collaborator(self, test_document, another_user):
+        """測試編輯權限協作者可以編輯文檔"""
+        DocumentCollaborator.objects.create(
+            document=test_document,
+            user=another_user,
+            permission=PermissionLevel.WRITE
+        )
+        assert test_document.can_user_write(another_user) is True
+
+    def test_can_user_write_read_collaborator(self, test_document, another_user):
+        """測試只讀權限協作者不能編輯文檔"""
+        DocumentCollaborator.objects.create(
+            document=test_document,
+            user=another_user,
+            permission=PermissionLevel.READ
+        )
+        assert test_document.can_user_write(another_user) is False
+
+    def test_can_user_write_non_collaborator(self, test_document, another_user):
+        """測試非協作者不能編輯文檔"""
+        assert test_document.can_user_write(another_user) is False
+
+    def test_get_user_permission_owner(self, test_document):
+        """測試獲取擁有者權限返回'owner'"""
+        permission = test_document.get_user_permission(test_document.owner)
+        assert permission == 'owner'
+
+    def test_get_user_permission_write_collaborator(self, test_document, another_user):
+        """測試獲取編輯協作者權限返回'write'"""
+        DocumentCollaborator.objects.create(
+            document=test_document,
+            user=another_user,
+            permission=PermissionLevel.WRITE
+        )
+        permission = test_document.get_user_permission(another_user)
+        assert permission == PermissionLevel.WRITE
+
+    def test_get_user_permission_read_collaborator(self, test_document, another_user):
+        """測試獲取只讀協作者權限返回'read'"""
+        DocumentCollaborator.objects.create(
+            document=test_document,
+            user=another_user,
+            permission=PermissionLevel.READ
+        )
+        permission = test_document.get_user_permission(another_user)
+        assert permission == PermissionLevel.READ
+
+    def test_get_user_permission_non_collaborator(self, test_document, another_user):
+        """測試獲取非協作者權限返回None"""
+        permission = test_document.get_user_permission(another_user)
+        assert permission is None

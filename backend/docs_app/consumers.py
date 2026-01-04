@@ -10,7 +10,7 @@ from channels.db import database_sync_to_async
 from django.contrib.auth.models import User
 from django.conf import settings
 from pydantic import ValidationError as PydanticValidationError
-from .models import Document
+from .models import Document, DocumentCollaborator, PermissionLevel
 from .schemas import WebSocketMessageSchema
 from .auth_middleware import AuthErrorType
 from .connection_manager import connection_manager
@@ -36,6 +36,7 @@ class WSCloseCodes:
     INVALID_MESSAGE = 4006       # 無效消息格式
     MESSAGE_TOO_LARGE = 4007     # 消息過大
     RATE_LIMITED = 4008          # 頻率限制
+    READ_ONLY_VIOLATION = 4009   # 只讀用戶嘗試寫入
 
 
 # 錯誤類型到關閉代碼的映射
@@ -61,6 +62,7 @@ class PermissionErrorType:
     NOT_AUTHENTICATED = 'NOT_AUTHENTICATED'
     DOCUMENT_NOT_FOUND = 'DOCUMENT_NOT_FOUND'
     PERMISSION_DENIED = 'PERMISSION_DENIED'
+    READ_ONLY = 'READ_ONLY'  # 只讀權限
 
 class DocConsumer(AsyncWebsocketConsumer):
     """
@@ -70,6 +72,7 @@ class DocConsumer(AsyncWebsocketConsumer):
     - 用戶連接和權限驗證
     - 實時編輯內容同步
     - 文檔保存事件廣播
+    - 權限區分（只讀用戶不能發送編輯）
     """
 
     @database_sync_to_async
@@ -82,12 +85,18 @@ class DocConsumer(AsyncWebsocketConsumer):
             document_id: 文檔ID
 
         Returns:
-            dict: {'allowed': bool, 'error_type': str or None, 'message': str or None}
+            dict: {
+                'allowed': bool,
+                'can_write': bool,  # 是否有寫入權限
+                'error_type': str or None,
+                'message': str or None
+            }
         """
         if not user or not user.is_authenticated:
             logger.warning(f"未認證用戶嘗試訪問文檔 {document_id}")
             return {
                 'allowed': False,
+                'can_write': False,
                 'error_type': PermissionErrorType.NOT_AUTHENTICATED,
                 'message': 'User not authenticated'
             }
@@ -99,6 +108,7 @@ class DocConsumer(AsyncWebsocketConsumer):
                 logger.warning(f"文檔 {document_id} 不存在")
                 return {
                     'allowed': False,
+                    'can_write': False,
                     'error_type': PermissionErrorType.DOCUMENT_NOT_FOUND,
                     'message': 'Document does not exist'
                 }
@@ -106,16 +116,36 @@ class DocConsumer(AsyncWebsocketConsumer):
             # 檢查是否是擁有者
             if document.owner == user:
                 logger.info(f"用戶 {user.username} 是文檔 {document_id} 的擁有者")
-                return {'allowed': True, 'error_type': None, 'message': None}
+                return {
+                    'allowed': True,
+                    'can_write': True,
+                    'error_type': None,
+                    'message': None
+                }
 
-            # 檢查是否是協作者
-            if document.shared_with.filter(id=user.id).exists():
-                logger.info(f"用戶 {user.username} 是文檔 {document_id} 的協作者")
-                return {'allowed': True, 'error_type': None, 'message': None}
+            # 檢查是否是協作者並獲取權限級別
+            collab = DocumentCollaborator.objects.filter(
+                document=document,
+                user=user
+            ).first()
+
+            if collab:
+                can_write = (collab.permission == PermissionLevel.WRITE)
+                logger.info(
+                    f"用戶 {user.username} 是文檔 {document_id} 的協作者 "
+                    f"(權限: {collab.permission})"
+                )
+                return {
+                    'allowed': True,
+                    'can_write': can_write,
+                    'error_type': None,
+                    'message': None
+                }
 
             logger.warning(f"用戶 {user.username} 無權限訪問文檔 {document_id}")
             return {
                 'allowed': False,
+                'can_write': False,
                 'error_type': PermissionErrorType.PERMISSION_DENIED,
                 'message': 'You do not have permission to access this document'
             }
@@ -123,6 +153,7 @@ class DocConsumer(AsyncWebsocketConsumer):
             logger.error(f"檢查用戶 {user.username} 對文檔 {document_id} 的權限時發生錯誤: {str(e)}")
             return {
                 'allowed': False,
+                'can_write': False,
                 'error_type': PermissionErrorType.PERMISSION_DENIED,
                 'message': 'Permission check failed'
             }
@@ -135,12 +166,17 @@ class DocConsumer(AsyncWebsocketConsumer):
         連接驗證流程：
         1. 檢查認證錯誤（從 middleware 獲取）
         2. 檢查文檔訪問權限
-        3. 加入房間組並接受連接
+        3. 檢查連接數量限制
+        4. 加入房間組並接受連接
+        5. 發送連接成功消息（包含權限信息）
         """
         self.document_id = self.scope['url_route']['kwargs']['document_id']
         self.room_group_name = f'doc_{self.document_id}'
         self.user = self.scope.get('user')
         auth_error = self.scope.get('auth_error')
+
+        # 初始化 can_write 標誌
+        self.can_write = False
 
         logger.info(f"用戶 {self.user.username if self.user else 'Anonymous'} 嘗試連接到文檔 {self.document_id}")
 
@@ -168,6 +204,9 @@ class DocConsumer(AsyncWebsocketConsumer):
             await self._reject_connection(error_type, error_message, close_code)
             return
 
+        # 保存寫入權限狀態
+        self.can_write = permission_result['can_write']
+
         # Step 3: 檢查連接數量限制
         if not await connection_manager.add_connection(
             self.user.id, self.channel_name
@@ -192,7 +231,14 @@ class DocConsumer(AsyncWebsocketConsumer):
         else:
             await self.accept()
 
-        logger.info(f"用戶 {self.user.username} 成功連接到文檔 {self.document_id}")
+        # Step 5: 發送連接成功消息（包含權限信息）
+        await self.send(text_data=json.dumps({
+            'type': 'connection_success',
+            'can_write': self.can_write,
+            'message': 'Connected successfully'
+        }))
+
+        logger.info(f"用戶 {self.user.username} 成功連接到文檔 {self.document_id} (can_write: {self.can_write})")
 
     async def _reject_connection(self, error_code: str, error_message: str, close_code: int):
         """
@@ -253,19 +299,29 @@ class DocConsumer(AsyncWebsocketConsumer):
         處理實時編輯的增量更新並廣播給其他用戶
 
         驗證流程：
-        0. 速率限制檢查
-        1. 檢查消息大小限制
-        2. JSON 解析
-        3. Pydantic Schema 驗證
-        4. 操作數量限制檢查
-        5. 廣播有效的 delta
+        0. 檢查寫入權限（只讀用戶不能發送編輯）
+        1. 速率限制檢查
+        2. 檢查消息大小限制
+        3. JSON 解析
+        4. Pydantic Schema 驗證
+        5. 操作數量限制檢查
+        6. 廣播有效的 delta
 
         Args:
             text_data: 接收到的JSON格式文本數據
         """
         username = getattr(self.user, 'username', 'Unknown')
 
-        # Step 0: 速率限制檢查（在所有其他驗證之前）
+        # Step 0: 檢查寫入權限
+        if not self.can_write:
+            logger.warning(f"只讀用戶 {username} 嘗試發送 delta 到文檔 {self.document_id}")
+            await self._send_error(
+                "READ_ONLY",
+                "You have read-only access to this document and cannot make edits"
+            )
+            return
+
+        # Step 1: 速率限制檢查（在所有其他驗證之前）
         allowed, rate_info = await rate_limiter.is_allowed(
             self.user.id, self.document_id
         )
@@ -277,7 +333,7 @@ class DocConsumer(AsyncWebsocketConsumer):
             )
             return
 
-        # Step 1: 檢查消息大小
+        # Step 2: 檢查消息大小
         message_size = len(text_data.encode('utf-8'))
         if message_size > MAX_MESSAGE_SIZE:
             logger.warning(
@@ -290,7 +346,7 @@ class DocConsumer(AsyncWebsocketConsumer):
             )
             return
 
-        # Step 2: JSON 解析
+        # Step 3: JSON 解析
         try:
             text_data_json = json.loads(text_data)
         except json.JSONDecodeError as e:
@@ -298,7 +354,7 @@ class DocConsumer(AsyncWebsocketConsumer):
             await self._send_error("INVALID_JSON", "Invalid JSON format")
             return
 
-        # Step 3: Pydantic Schema 驗證
+        # Step 4: Pydantic Schema 驗證
         try:
             validated_message = WebSocketMessageSchema(**text_data_json)
             delta = validated_message.delta.model_dump()
@@ -310,7 +366,7 @@ class DocConsumer(AsyncWebsocketConsumer):
             await self._send_error("INVALID_DELTA_FORMAT", f"Invalid delta format: {error_messages}")
             return
 
-        # Step 4: 檢查操作數量限制
+        # Step 5: 檢查操作數量限制
         ops_count = len(delta.get('ops', []))
         if ops_count > MAX_OPS_COUNT:
             logger.warning(
@@ -323,7 +379,7 @@ class DocConsumer(AsyncWebsocketConsumer):
             )
             return
 
-        # Step 5: 驗證通過，廣播 delta
+        # Step 6: 驗證通過，廣播 delta
         logger.debug(f"用戶 {username} 在文檔 {self.document_id} 中發送增量更新")
 
         await self.channel_layer.group_send(
@@ -340,7 +396,7 @@ class DocConsumer(AsyncWebsocketConsumer):
         向客戶端發送錯誤消息
 
         Args:
-            error_code: 錯誤代碼 (e.g., "INVALID_JSON", "MESSAGE_TOO_LARGE", "RATE_LIMITED")
+            error_code: 錯誤代碼 (e.g., "INVALID_JSON", "MESSAGE_TOO_LARGE", "RATE_LIMITED", "READ_ONLY")
             error_message: 人類可讀的錯誤描述
             extra: 可選的額外數據（如 retry_after）
         """

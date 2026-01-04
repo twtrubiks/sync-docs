@@ -190,7 +190,6 @@ As an **educational demonstration project**, this project provides comprehensive
 
 This project is an MVP (Minimum Viable Product) with plenty of room for improvement. Here are some potential future features:
 
-  * **Advanced Permissions**: Implement role-based access control (e.g., view-only, comment-only, edit access).
   * **Presence Indicators**: Show which users are currently viewing or editing the document.
   * **Cursor Presence**: Display collaborators' cursors in real-time.
   * **Document Version History**: Allow users to view and revert to previous versions of a document.

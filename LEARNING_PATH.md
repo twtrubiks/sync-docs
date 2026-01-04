@@ -71,7 +71,7 @@
   - `Document` 模型的欄位設計
   - `UUIDField` 為什麼比自增 ID 更適合分散式系統
   - `JSONField` 如何儲存 Quill Delta
-  - `ForeignKey`（owner）vs `ManyToManyField`（shared_with）
+  - `ForeignKey`（owner）vs `DocumentCollaborator` 中間模型（支援權限級別）
 
 **1.2 ORM 查詢練習**
 - 閱讀檔案：`backend/docs_app/migrations/`

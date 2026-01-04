@@ -133,12 +133,10 @@ class TestAuthErrorResponse:
         connected, _ = await communicator.connect()
         assert connected is True
 
-        # 不應該收到錯誤消息
-        with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(
-                communicator.receive_json_from(),
-                timeout=0.5
-            )
+        # 應該收到 connection_success 消息
+        response = await communicator.receive_json_from(timeout=2)
+        assert response['type'] == 'connection_success'
+        assert response['can_write'] is True
 
         await communicator.disconnect()
 
@@ -155,12 +153,30 @@ class TestAuthErrorResponse:
         connected, _ = await communicator.connect()
         assert connected is True
 
-        # 不應該收到錯誤消息
-        with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(
-                communicator.receive_json_from(),
-                timeout=0.5
-            )
+        # 應該收到 connection_success 消息
+        response = await communicator.receive_json_from(timeout=2)
+        assert response['type'] == 'connection_success'
+        assert response['can_write'] is True  # shared_document fixture 使用 WRITE 權限
+
+        await communicator.disconnect()
+
+    async def test_read_only_collaborator_connection_success(
+        self, websocket_application, read_only_shared_document, jwt_token_for_read_only_user
+    ):
+        """測試只讀協作者連接成功，但 can_write=False"""
+        communicator = WebsocketCommunicator(
+            websocket_application,
+            f"/ws/docs/{read_only_shared_document.id}/",
+            subprotocols=[f"access_token.{jwt_token_for_read_only_user}"]
+        )
+
+        connected, _ = await communicator.connect()
+        assert connected is True
+
+        # 應該收到 connection_success 消息，但 can_write=False
+        response = await communicator.receive_json_from(timeout=2)
+        assert response['type'] == 'connection_success'
+        assert response['can_write'] is False  # 關鍵：只讀用戶 can_write=False
 
         await communicator.disconnect()
 
@@ -186,12 +202,9 @@ class TestConnectionLimit:
                 assert connected is True
                 communicators.append(comm)
 
-                # 確認沒有錯誤消息
-                with pytest.raises(asyncio.TimeoutError):
-                    await asyncio.wait_for(
-                        comm.receive_json_from(),
-                        timeout=0.3
-                    )
+                # 應該收到 connection_success 消息
+                response = await comm.receive_json_from(timeout=2)
+                assert response['type'] == 'connection_success'
 
         finally:
             for comm in communicators:
@@ -258,6 +271,10 @@ class TestRateLimiting:
         try:
             await communicator.connect()
 
+            # 消費 connection_success 訊息
+            response = await communicator.receive_json_from(timeout=2)
+            assert response['type'] == 'connection_success'
+
             # Mock rate_limiter 允許所有消息
             with patch(
                 'docs_app.consumers.rate_limiter.is_allowed',
@@ -294,6 +311,10 @@ class TestRateLimiting:
 
         try:
             await communicator.connect()
+
+            # 消費 connection_success 訊息
+            response = await communicator.receive_json_from(timeout=2)
+            assert response['type'] == 'connection_success'
 
             # Mock rate_limiter 拒絕消息
             with patch(

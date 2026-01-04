@@ -1,7 +1,7 @@
 import json
 import pytest
 from unittest.mock import patch, MagicMock
-from docs_app.models import Document
+from docs_app.models import Document, DocumentCollaborator, PermissionLevel
 
 # 使用 pytest-django 的 db fixture 來確保資料庫在測試之間是乾淨的
 pytestmark = pytest.mark.django_db
@@ -346,9 +346,9 @@ def test_owner_can_share_document(authenticated_client, collaborator_user_and_to
     )
     assert response_share.status_code == 200, f"Share document failed: {response_share.content.decode()}"
 
-    # 驗證協作者已加入 shared_with
+    # 驗證協作者已加入 collaborators
     document.refresh_from_db()
-    assert collaborator in document.shared_with.all()
+    assert document.collaborators.filter(user=collaborator).exists()
 
     # 驗證協作者清單 API
     response_get_collaborators = client.get(
@@ -359,6 +359,7 @@ def test_owner_can_share_document(authenticated_client, collaborator_user_and_to
     collaborators_data = response_get_collaborators.json()
     assert len(collaborators_data) == 1
     assert collaborators_data[0]["username"] == collaborator.username
+    assert collaborators_data[0]["permission"] == "write"  # 預設編輯權限
 
 
 def test_collaborator_can_access_shared_document(authenticated_client, collaborator_user_and_token):
@@ -399,7 +400,7 @@ def test_collaborator_can_access_shared_document(authenticated_client, collabora
 
 
 def test_collaborator_can_edit_shared_document(authenticated_client, collaborator_user_and_token):
-    """測試協作者可以編輯被分享的文檔"""
+    """測試編輯權限協作者可以編輯被分享的文檔"""
     client, _, owner_access_token = authenticated_client
     collaborator, collaborator_access_token = collaborator_user_and_token
 
@@ -411,7 +412,7 @@ def test_collaborator_can_edit_shared_document(authenticated_client, collaborato
     assert response_create.status_code == 200
     document_id = response_create.json()["id"]
 
-    # 2. Owner shares the document with the collaborator
+    # 2. Owner shares the document with the collaborator (default write permission)
     share_data = {"username": collaborator.username}
     response_share = client.post(
         f"/api/documents/{document_id}/collaborators/",
@@ -453,7 +454,7 @@ def test_owner_can_remove_collaborator(authenticated_client, collaborator_user_a
     share_data = {"username": collaborator.username}
     client.post(f"/api/documents/{document_id}/collaborators/", data=json.dumps(share_data), content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {owner_access_token}")
     document.refresh_from_db()
-    assert collaborator in document.shared_with.all()
+    assert document.collaborators.filter(user=collaborator).exists()
 
     # 2. Owner removes the collaborator
     # Endpoint: DELETE /api/documents/{document_id}/collaborators/{user_id}/
@@ -462,12 +463,9 @@ def test_owner_can_remove_collaborator(authenticated_client, collaborator_user_a
         HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
     )
     assert response_remove.status_code == 200, f"Remove collaborator failed: {response_remove.content.decode()}"
-    # Assuming 200 OK on successful removal. Some APIs might return 204 No Content.
-    # If the API returns a body (e.g. updated list of collaborators), check it.
-    # For now, we check the DB.
 
     document.refresh_from_db()
-    assert collaborator not in document.shared_with.all()
+    assert not document.collaborators.filter(user=collaborator).exists()
 
     # 驗證協作者清單為空
     response_get_collaborators = client.get(
@@ -548,7 +546,189 @@ def test_owner_cannot_share_document_with_self(authenticated_client):
     assert "detail" in response_data
     assert "yourself" in response_data["detail"].lower()
 
-    # 4. 驗證擁有者未被添加到 shared_with
+    # 4. 驗證擁有者未被添加到 collaborators
     document.refresh_from_db()
-    assert owner_user not in document.shared_with.all()
-    assert document.shared_with.count() == 0
+    assert not document.collaborators.filter(user=owner_user).exists()
+    assert document.collaborators.count() == 0
+
+
+# --- 權限區分測試 ---
+
+def test_read_only_collaborator_cannot_edit(authenticated_client, create_user):
+    """測試只讀協作者不能編輯文檔"""
+    client, owner_user, owner_access_token = authenticated_client
+
+    # 創建只讀協作者
+    read_only_user = create_user(username="readonly", email="readonly@example.com")
+    read_only_token = get_user_token(client, read_only_user)
+
+    # 擁有者創建文檔
+    doc_data = {"title": "Read Only Test", "content": {"data": "original"}}
+    response = client.post(
+        DOCUMENTS_ENDPOINT,
+        data=doc_data,
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
+    )
+    document_id = response.json()["id"]
+
+    # 以只讀權限添加協作者
+    share_data = {"username": read_only_user.username, "permission": "read"}
+    client.post(
+        f"/api/documents/{document_id}/collaborators/",
+        data=json.dumps(share_data),
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
+    )
+
+    # 只讀用戶嘗試讀取 - 應該成功
+    response_get = client.get(
+        f"{DOCUMENTS_ENDPOINT}{document_id}/",
+        HTTP_AUTHORIZATION=f"Bearer {read_only_token}"
+    )
+    assert response_get.status_code == 200
+    assert response_get.json()["can_write"] == False
+    assert response_get.json()["permission"] == "read"
+
+    # 只讀用戶嘗試編輯 - 應該失敗 (403)
+    edit_data = {"title": "Hacked by readonly"}
+    response_edit = client.put(
+        f"{DOCUMENTS_ENDPOINT}{document_id}/",
+        data=edit_data,
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {read_only_token}"
+    )
+    assert response_edit.status_code == 403
+
+    # 驗證文檔未被修改
+    document = Document.objects.get(id=document_id)
+    assert document.title == doc_data["title"]
+
+
+def test_write_collaborator_can_edit(authenticated_client, create_user):
+    """測試編輯權限協作者可以編輯文檔"""
+    client, owner_user, owner_access_token = authenticated_client
+
+    write_user = create_user(username="writer", email="writer@example.com")
+    write_token = get_user_token(client, write_user)
+
+    # 擁有者創建文檔
+    doc_data = {"title": "Write Test", "content": {"data": "original"}}
+    response = client.post(
+        DOCUMENTS_ENDPOINT,
+        data=doc_data,
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
+    )
+    document_id = response.json()["id"]
+
+    # 以編輯權限添加協作者
+    share_data = {"username": write_user.username, "permission": "write"}
+    client.post(
+        f"/api/documents/{document_id}/collaborators/",
+        data=json.dumps(share_data),
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
+    )
+
+    # 驗證權限信息
+    response_get = client.get(
+        f"{DOCUMENTS_ENDPOINT}{document_id}/",
+        HTTP_AUTHORIZATION=f"Bearer {write_token}"
+    )
+    assert response_get.status_code == 200
+    assert response_get.json()["can_write"] == True
+    assert response_get.json()["permission"] == "write"
+
+    # 編輯用戶嘗試編輯 - 應該成功
+    edit_data = {"title": "Edited by writer"}
+    response_edit = client.put(
+        f"{DOCUMENTS_ENDPOINT}{document_id}/",
+        data=edit_data,
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {write_token}"
+    )
+    assert response_edit.status_code == 200
+    assert response_edit.json()["title"] == "Edited by writer"
+
+
+def test_update_collaborator_permission(authenticated_client, create_user):
+    """測試更新協作者權限"""
+    client, owner_user, owner_access_token = authenticated_client
+
+    collab_user = create_user(username="collab", email="collab@example.com")
+    collab_token = get_user_token(client, collab_user)
+
+    # 創建文檔
+    doc_data = {"title": "Permission Update Test", "content": {}}
+    response = client.post(
+        DOCUMENTS_ENDPOINT,
+        data=doc_data,
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
+    )
+    document_id = response.json()["id"]
+
+    # 以只讀權限添加
+    share_data = {"username": collab_user.username, "permission": "read"}
+    client.post(
+        f"/api/documents/{document_id}/collaborators/",
+        data=json.dumps(share_data),
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
+    )
+
+    # 確認只讀權限不能編輯
+    edit_data = {"title": "Should fail"}
+    response_edit = client.put(
+        f"{DOCUMENTS_ENDPOINT}{document_id}/",
+        data=edit_data,
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {collab_token}"
+    )
+    assert response_edit.status_code == 403
+
+    # 更新為編輯權限
+    update_data = {"permission": "write"}
+    response_update = client.put(
+        f"/api/documents/{document_id}/collaborators/{collab_user.id}/",
+        data=json.dumps(update_data),
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
+    )
+    assert response_update.status_code == 200
+    assert response_update.json()["permission"] == "write"
+
+    # 確認現在可以編輯
+    edit_data = {"title": "Now can edit"}
+    response_edit = client.put(
+        f"{DOCUMENTS_ENDPOINT}{document_id}/",
+        data=edit_data,
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {collab_token}"
+    )
+    assert response_edit.status_code == 200
+    assert response_edit.json()["title"] == "Now can edit"
+
+
+def test_document_response_includes_permission_fields(authenticated_client, create_user):
+    """測試文檔響應包含權限欄位"""
+    client, owner_user, owner_access_token = authenticated_client
+
+    # 創建文檔
+    doc_data = {"title": "Permission Fields Test", "content": {}}
+    response = client.post(
+        DOCUMENTS_ENDPOINT,
+        data=doc_data,
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
+    )
+    assert response.status_code == 200
+    response_data = response.json()
+
+    # 驗證擁有者的權限欄位
+    assert "permission" in response_data
+    assert "can_write" in response_data
+    assert response_data["permission"] == "owner"
+    assert response_data["can_write"] == True
+    assert response_data["is_owner"] == True

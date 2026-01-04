@@ -7,7 +7,7 @@ import pytest
 import jwt
 from django.conf import settings
 from django.contrib.auth.models import User
-from docs_app.models import Document
+from docs_app.models import Document, DocumentCollaborator, PermissionLevel
 
 
 @pytest.fixture
@@ -42,14 +42,56 @@ def test_document(test_user):
 
 @pytest.fixture
 def shared_document(test_user, another_user):
-    """創建共享文檔的fixture"""
+    """創建共享文檔的fixture（編輯權限）"""
     doc = Document.objects.create(
         title="Shared Document",
         content={"type": "doc", "content": []},
         owner=test_user
     )
-    doc.shared_with.add(another_user)
+    DocumentCollaborator.objects.create(
+        document=doc,
+        user=another_user,
+        permission=PermissionLevel.WRITE
+    )
     return doc
+
+
+# ===== 權限相關 Fixtures =====
+
+@pytest.fixture
+def read_only_user():
+    """創建只讀測試用戶"""
+    return User.objects.create_user(
+        username="readonlyuser",
+        password="testpassword123",
+        email="readonly@example.com"
+    )
+
+
+@pytest.fixture
+def read_only_shared_document(test_user, read_only_user):
+    """創建只讀共享文檔"""
+    doc = Document.objects.create(
+        title="Read Only Shared Document",
+        content={"ops": [{"insert": "\n"}]},
+        owner=test_user
+    )
+    DocumentCollaborator.objects.create(
+        document=doc,
+        user=read_only_user,
+        permission=PermissionLevel.READ
+    )
+    return doc
+
+
+@pytest.fixture
+def jwt_token_for_read_only_user(read_only_user):
+    """生成 read_only_user 的 JWT token"""
+    payload = {
+        'user_id': read_only_user.id,
+        'username': read_only_user.username
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
 
 
 # ===== WebSocket 整合測試 Fixtures =====
@@ -66,13 +108,22 @@ def third_user():
 
 @pytest.fixture
 def multi_shared_document(test_user, another_user, third_user):
-    """創建三人共享的文檔"""
+    """創建三人共享的文檔（都是編輯權限）"""
     doc = Document.objects.create(
         title="Multi Shared Document",
         content={"ops": [{"insert": "\n"}]},
         owner=test_user
     )
-    doc.shared_with.add(another_user, third_user)
+    DocumentCollaborator.objects.create(
+        document=doc,
+        user=another_user,
+        permission=PermissionLevel.WRITE
+    )
+    DocumentCollaborator.objects.create(
+        document=doc,
+        user=third_user,
+        permission=PermissionLevel.WRITE
+    )
     return doc
 
 

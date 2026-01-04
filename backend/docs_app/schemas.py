@@ -31,6 +31,38 @@ class RegisterSchema(Schema):
 class ShareRequestSchema(Schema):
     """分享請求模式"""
     username: str
+    permission: str = 'write'  # 預設編輯權限
+
+    @field_validator('permission')
+    @classmethod
+    def validate_permission(cls, v):
+        """驗證權限級別"""
+        allowed = ['read', 'write']
+        if v not in allowed:
+            raise ValueError(f"Permission must be one of: {allowed}")
+        return v
+
+
+class CollaboratorSchema(Schema):
+    """協作者信息響應模式"""
+    id: int
+    username: str
+    email: Optional[str] = None
+    permission: str  # 'read' 或 'write'
+
+
+class UpdateCollaboratorPermissionSchema(Schema):
+    """更新協作者權限請求模式"""
+    permission: str
+
+    @field_validator('permission')
+    @classmethod
+    def validate_permission(cls, v):
+        """驗證權限級別"""
+        allowed = ['read', 'write']
+        if v not in allowed:
+            raise ValueError(f"Permission must be one of: {allowed}")
+        return v
 
 
 class DocumentListSchema(Schema):
@@ -41,6 +73,8 @@ class DocumentListSchema(Schema):
     created_at: datetime
     updated_at: datetime
     is_owner: bool = False
+    permission: Optional[str] = None  # 用戶對該文檔的權限級別
+    can_write: bool = True  # 用戶是否可以編輯
 
 
 class DocumentSchema(Schema):
@@ -52,6 +86,8 @@ class DocumentSchema(Schema):
     created_at: datetime
     updated_at: datetime
     is_owner: bool = False
+    permission: Optional[str] = None  # 用戶對該文檔的權限級別
+    can_write: bool = True  # 用戶是否可以編輯
 
 
 class DocumentCreateSchema(Schema):
