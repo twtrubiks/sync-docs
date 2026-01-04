@@ -3,6 +3,8 @@
 提供共用的測試fixtures和配置
 """
 
+import time
+
 import pytest
 import jwt
 from django.conf import settings
@@ -160,7 +162,6 @@ def jwt_token_for_third_user(third_user):
 @pytest.fixture
 def expired_jwt_token(test_user):
     """生成已過期的 JWT token"""
-    import time
     payload = {
         'user_id': test_user.id,
         'username': test_user.username,

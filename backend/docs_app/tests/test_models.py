@@ -3,6 +3,8 @@
 測試Document模型的方法和功能
 """
 
+import time
+
 import pytest
 from django.contrib.auth.models import User
 from docs_app.models import Document, DocumentCollaborator, PermissionLevel
@@ -140,8 +142,6 @@ class TestDocumentModel:
 
     def test_document_ordering(self, test_user):
         """測試文檔按更新時間倒序排列"""
-        import time
-
         # 創建第一個文檔
         doc1 = Document.objects.create(
             title="First Document",
@@ -282,7 +282,6 @@ class TestDocumentModel:
         assert updated_at is not None
 
         # 更新文檔
-        import time
         time.sleep(0.01)  # 確保時間差異
         document.title = "Updated Title"
         document.save()

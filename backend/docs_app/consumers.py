@@ -7,7 +7,6 @@ import json
 import logging
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from django.contrib.auth.models import User
 from django.conf import settings
 from pydantic import ValidationError as PydanticValidationError
 from .models import Document, DocumentCollaborator, PermissionLevel
@@ -15,7 +14,6 @@ from .schemas import WebSocketMessageSchema
 from .auth_middleware import AuthErrorType
 from .connection_manager import connection_manager
 from .rate_limiter import rate_limiter
-from django.db.models import Q
 
 # 獲取日誌記錄器
 logger = logging.getLogger('docs_app')

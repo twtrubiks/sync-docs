@@ -4,11 +4,10 @@
 """
 
 import logging
-from ninja_extra import api_controller, http_post, route, http_get
+from ninja_extra import api_controller, http_post, http_get
 from django.contrib.auth.models import User
 from ninja_jwt.controller import NinjaJWTDefaultController
 from ninja_jwt.authentication import JWTAuth
-from ninja_jwt.tokens import RefreshToken
 from django.core.exceptions import ValidationError
 from django.contrib.auth.password_validation import validate_password
 from .schemas import UserSchema, RegisterSchema

@@ -4,6 +4,8 @@ WebSocket 消息驗證測試模組
 測試 Delta Schema 驗證和 WebSocket 消息格式驗證
 """
 
+import json
+
 import pytest
 from pydantic import ValidationError
 from docs_app.schemas import (
@@ -231,7 +233,6 @@ class TestMessageSizeValidation:
 
     def test_message_size_calculation(self):
         """測試消息大小計算"""
-        import json
         large_insert = "x" * 300000  # 300KB of text
         message_dict = {"delta": {"ops": [{"insert": large_insert}]}}
         size = len(json.dumps(message_dict).encode('utf-8'))

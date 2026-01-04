@@ -3,6 +3,8 @@ JWT認證中間件測試模組
 測試WebSocket連接的JWT認證功能
 """
 
+import time
+
 import pytest
 import jwt
 from django.conf import settings
@@ -35,7 +37,6 @@ def valid_jwt_token(test_user):
 @pytest.fixture
 def expired_jwt_token(test_user):
     """創建過期的JWT token"""
-    import time
     payload = {
         'user_id': test_user.id,
         'username': test_user.username,
@@ -85,9 +86,6 @@ def test_anonymous_user_properties():
 
 def test_jwt_token_creation_and_parsing(test_user, valid_jwt_token):
     """測試JWT token的創建和解析"""
-    import jwt
-    from django.conf import settings
-
     # 驗證token能被正確解析
     payload = jwt.decode(valid_jwt_token, settings.SECRET_KEY, algorithms=["HS256"])
     assert payload.get('user_id') == test_user.id
@@ -96,18 +94,12 @@ def test_jwt_token_creation_and_parsing(test_user, valid_jwt_token):
 
 def test_expired_jwt_token_parsing(test_user, expired_jwt_token):
     """測試過期JWT token的解析"""
-    import jwt
-    from django.conf import settings
-
     # 驗證過期token會拋出異常
     with pytest.raises(jwt.ExpiredSignatureError):
         jwt.decode(expired_jwt_token, settings.SECRET_KEY, algorithms=["HS256"])
 
 def test_invalid_jwt_token_parsing(invalid_jwt_token):
     """測試無效JWT token的解析"""
-    import jwt
-    from django.conf import settings
-
     # 驗證無效token會拋出異常
     with pytest.raises(jwt.InvalidTokenError):
         jwt.decode(invalid_jwt_token, settings.SECRET_KEY, algorithms=["HS256"])
