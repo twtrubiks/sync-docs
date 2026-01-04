@@ -104,6 +104,10 @@ CHANNEL_LAYERS = {
 #     }
 # }
 
+# WebSocket 安全配置
+WEBSOCKET_MAX_MESSAGE_SIZE = int(os.environ.get('WEBSOCKET_MAX_MESSAGE_SIZE', 256 * 1024))  # 256KB
+WEBSOCKET_MAX_OPS_COUNT = int(os.environ.get('WEBSOCKET_MAX_OPS_COUNT', 1000))
+
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases

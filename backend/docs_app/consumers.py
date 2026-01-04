@@ -8,11 +8,18 @@ import logging
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.contrib.auth.models import User
+from django.conf import settings
+from pydantic import ValidationError as PydanticValidationError
 from .models import Document
+from .schemas import WebSocketMessageSchema
 from django.db.models import Q
 
 # 獲取日誌記錄器
 logger = logging.getLogger('docs_app')
+
+# WebSocket 安全配置
+MAX_MESSAGE_SIZE = getattr(settings, 'WEBSOCKET_MAX_MESSAGE_SIZE', 256 * 1024)  # 256KB
+MAX_OPS_COUNT = getattr(settings, 'WEBSOCKET_MAX_OPS_COUNT', 1000)
 
 class DocConsumer(AsyncWebsocketConsumer):
     """
@@ -110,32 +117,92 @@ class DocConsumer(AsyncWebsocketConsumer):
         接收來自WebSocket的消息
         處理實時編輯的增量更新並廣播給其他用戶
 
+        驗證流程：
+        1. 檢查消息大小限制
+        2. JSON 解析
+        3. Pydantic Schema 驗證
+        4. 操作數量限制檢查
+        5. 廣播有效的 delta
+
         Args:
             text_data: 接收到的JSON格式文本數據
         """
+        username = getattr(self.user, 'username', 'Unknown')
+
+        # Step 1: 檢查消息大小
+        message_size = len(text_data.encode('utf-8'))
+        if message_size > MAX_MESSAGE_SIZE:
+            logger.warning(
+                f"用戶 {username} 發送的消息超過大小限制: "
+                f"{message_size} bytes > {MAX_MESSAGE_SIZE} bytes"
+            )
+            await self._send_error(
+                "MESSAGE_TOO_LARGE",
+                f"Message size ({message_size} bytes) exceeds maximum allowed ({MAX_MESSAGE_SIZE} bytes)"
+            )
+            return
+
+        # Step 2: JSON 解析
         try:
             text_data_json = json.loads(text_data)
-            delta = text_data_json.get('delta')
-
-            if not delta:
-                logger.warning(f"用戶 {self.user.username} 發送了無效的增量數據")
-                return
-
-            logger.debug(f"用戶 {self.user.username} 在文檔 {self.document_id} 中發送增量更新")
-
-            # 向組中的其他用戶廣播增量更新，實現實時編輯
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    'type': 'doc_update',
-                    'delta': delta,
-                    'sender_channel': self.channel_name
-                }
-            )
         except json.JSONDecodeError as e:
-            logger.error(f"用戶 {self.user.username} 發送了無效的JSON數據: {str(e)}")
+            logger.error(f"用戶 {username} 發送了無效的JSON數據: {str(e)}")
+            await self._send_error("INVALID_JSON", "Invalid JSON format")
+            return
+
+        # Step 3: Pydantic Schema 驗證
+        try:
+            validated_message = WebSocketMessageSchema(**text_data_json)
+            delta = validated_message.delta.model_dump()
+        except PydanticValidationError as e:
+            error_messages = "; ".join([err['msg'] for err in e.errors()])
+            logger.warning(
+                f"用戶 {username} 發送了無效的 Delta 格式: {error_messages}"
+            )
+            await self._send_error("INVALID_DELTA_FORMAT", f"Invalid delta format: {error_messages}")
+            return
+
+        # Step 4: 檢查操作數量限制
+        ops_count = len(delta.get('ops', []))
+        if ops_count > MAX_OPS_COUNT:
+            logger.warning(
+                f"用戶 {username} 發送的操作數量超過限制: "
+                f"{ops_count} > {MAX_OPS_COUNT}"
+            )
+            await self._send_error(
+                "TOO_MANY_OPERATIONS",
+                f"Too many operations ({ops_count}). Maximum allowed: {MAX_OPS_COUNT}"
+            )
+            return
+
+        # Step 5: 驗證通過，廣播 delta
+        logger.debug(f"用戶 {username} 在文檔 {self.document_id} 中發送增量更新")
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                'type': 'doc_update',
+                'delta': delta,
+                'sender_channel': self.channel_name
+            }
+        )
+
+    async def _send_error(self, error_code: str, error_message: str):
+        """
+        向客戶端發送錯誤消息
+
+        Args:
+            error_code: 錯誤代碼 (e.g., "INVALID_JSON", "MESSAGE_TOO_LARGE")
+            error_message: 人類可讀的錯誤描述
+        """
+        try:
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'error_code': error_code,
+                'message': error_message
+            }))
         except Exception as e:
-            logger.error(f"處理用戶 {self.user.username} 的消息時發生錯誤: {str(e)}")
+            logger.error(f"發送錯誤消息失敗: {str(e)}")
 
     async def doc_update(self, event):
         """
