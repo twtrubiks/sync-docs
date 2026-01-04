@@ -4,6 +4,8 @@
 """
 
 import pytest
+import jwt
+from django.conf import settings
 from django.contrib.auth.models import User
 from docs_app.models import Document
 
@@ -48,3 +50,80 @@ def shared_document(test_user, another_user):
     )
     doc.shared_with.add(another_user)
     return doc
+
+
+# ===== WebSocket 整合測試 Fixtures =====
+
+@pytest.fixture
+def third_user():
+    """創建第三個測試用戶，用於三客戶端測試"""
+    return User.objects.create_user(
+        username="thirduser",
+        password="testpassword123",
+        email="third@example.com"
+    )
+
+
+@pytest.fixture
+def multi_shared_document(test_user, another_user, third_user):
+    """創建三人共享的文檔"""
+    doc = Document.objects.create(
+        title="Multi Shared Document",
+        content={"ops": [{"insert": "\n"}]},
+        owner=test_user
+    )
+    doc.shared_with.add(another_user, third_user)
+    return doc
+
+
+@pytest.fixture
+def jwt_token_for_user(test_user):
+    """生成 test_user 的 JWT token"""
+    payload = {
+        'user_id': test_user.id,
+        'username': test_user.username
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+
+
+@pytest.fixture
+def jwt_token_for_another_user(another_user):
+    """生成 another_user 的 JWT token"""
+    payload = {
+        'user_id': another_user.id,
+        'username': another_user.username
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+
+
+@pytest.fixture
+def jwt_token_for_third_user(third_user):
+    """生成 third_user 的 JWT token"""
+    payload = {
+        'user_id': third_user.id,
+        'username': third_user.username
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+
+
+@pytest.fixture
+def websocket_application(settings):
+    """
+    WebSocket ASGI 應用，使用 InMemoryChannelLayer 避免 Redis 依賴
+    """
+    # 覆蓋 channel layer 設定
+    settings.CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer"
+        }
+    }
+
+    from channels.routing import ProtocolTypeRouter, URLRouter
+    from docs_app.auth_middleware import JWTAuthMiddleware
+    import docs_app.routing
+
+    return ProtocolTypeRouter({
+        "websocket": JWTAuthMiddleware(
+            URLRouter(docs_app.routing.websocket_urlpatterns)
+        ),
+    })
