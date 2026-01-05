@@ -3,9 +3,10 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import QuillEditor from '$lib/components/QuillEditor.svelte';
-	import { get, put, del, post, logout, type User, type Collaborator } from '$lib/auth';
+	import { get, put, del, post, logout, type Collaborator } from '$lib/auth';
 	import { toast } from '@zerodevx/svelte-toast';
 	import type { QuillDelta, QuillType } from '$lib/types/quill';
+	import Delta from 'quill-delta';
 
 	// WebSocket Close Codes（與後端對應）
 	const WS_CLOSE_CODES = {
@@ -45,6 +46,12 @@
 	let saveStatus: 'idle' | 'unsaved' | 'saving' | 'saved' | 'error' | 'connecting' =
 		$state('connecting');
 	let debounceTimeout: ReturnType<typeof setTimeout> | undefined = $state(undefined);
+
+	// Throttle state for WebSocket delta sending
+	let pendingDelta: QuillDelta | null = $state(null);
+	let throttleTimeout: ReturnType<typeof setTimeout> | undefined = $state(undefined);
+	let lastSendTime = $state(0);
+	const THROTTLE_INTERVAL = 150; // ms（100-200ms 範圍）
 
 	// Permission state (from API and WebSocket)
 	let canWrite = $state(true);
@@ -320,6 +327,16 @@
 		}, 1500);
 	};
 
+	// Send pending delta via WebSocket (used by throttle mechanism)
+	function sendPendingDelta() {
+		if (!pendingDelta) return;
+		if (socket && socket.readyState === WebSocket.OPEN) {
+			socket.send(JSON.stringify({ delta: pendingDelta }));
+		}
+		pendingDelta = null;
+		lastSendTime = Date.now();
+	}
+
 	async function handleDelete() {
 		if (!confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
 			return;
@@ -347,25 +364,50 @@
 	}
 
 	// Svelte 5: Updated handler signature for callback prop (no more CustomEvent)
+	// Uses throttle mechanism to limit WebSocket message frequency
 	function handleContentChange(detail: { delta: QuillDelta; source: string }) {
 		const { delta, source } = detail;
 		if (source !== 'user') return;
 
-		if (socket && socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ delta }));
+		// Accumulate delta using Quill Delta's compose method
+		if (pendingDelta) {
+			const d1 = new Delta(pendingDelta.ops);
+			const d2 = new Delta(delta.ops);
+			pendingDelta = { ops: d1.compose(d2).ops };
+		} else {
+			pendingDelta = delta;
 		}
+
+		const now = Date.now();
+		const timeSinceLastSend = now - lastSendTime;
+
+		if (timeSinceLastSend >= THROTTLE_INTERVAL) {
+			// Enough time has passed, send immediately
+			sendPendingDelta();
+		} else {
+			// Schedule send for trailing edge
+			clearTimeout(throttleTimeout);
+			throttleTimeout = setTimeout(sendPendingDelta, THROTTLE_INTERVAL - timeSinceLastSend);
+		}
+
 		// The `content` variable is already updated by the `bind:value` directive.
 		// We just need to trigger the save.
 		debouncedSave();
 	}
 
 	onDestroy(() => {
+		// Send any pending delta before closing
+		if (pendingDelta && socket?.readyState === WebSocket.OPEN) {
+			socket.send(JSON.stringify({ delta: pendingDelta }));
+		}
+
 		if (socket) {
 			// Prevent the onclose handler from firing when we navigate away
 			socket.onclose = null;
 			socket.close();
 		}
 		clearTimeout(debounceTimeout);
+		clearTimeout(throttleTimeout);
 	});
 </script>
 

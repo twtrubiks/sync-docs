@@ -785,8 +785,9 @@ const debouncedSave = () => {
 
 ### 3. WebSocket 訊息優化
 
+#### 後端：避免 Echo（回聲）
+
 ```python
-# 避免 Echo（回聲）
 async def doc_update(self, event):
     sender_channel = event.get('sender_channel')
     if self.channel_name != sender_channel:  # 不發回原始發送者
@@ -796,6 +797,32 @@ async def doc_update(self, event):
 **節省：**
 - 50% 的網路流量（雙向 → 單向）
 - 避免無限循環
+
+#### 前端：Throttle 機制
+
+```typescript
+// 使用 throttle 控制 WebSocket 發送頻率
+const THROTTLE_INTERVAL = 150; // ms
+
+// 累積 delta 並合併
+if (pendingDelta) {
+    pendingDelta = { ops: d1.compose(d2).ops };
+}
+```
+
+**配合設計：**
+
+| 層級 | 機制 | 配置 | 效果 |
+|------|------|------|------|
+| 前端 | Throttle | 150ms 間隔 | ~7 條/秒 |
+| 後端 | 滑動窗口 | 30 條/10 秒 | 防止濫用 |
+
+**Throttle vs Debounce：**
+
+| 機制 | 用途 | 延遲 |
+|------|------|------|
+| Throttle | WebSocket 即時同步 | 最大 150ms |
+| Debounce | HTTP API 儲存 | 1.5 秒 |
 
 ### 4. 索引優化
 
