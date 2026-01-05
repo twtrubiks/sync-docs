@@ -3,6 +3,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import QuillEditor from '$lib/components/QuillEditor.svelte';
+	import VersionHistoryPanel from '$lib/components/VersionHistoryPanel.svelte';
 	import { get, put, del, post, logout, type Collaborator } from '$lib/auth';
 	import { toast } from '@zerodevx/svelte-toast';
 	import type { QuillDelta, QuillType } from '$lib/types/quill';
@@ -66,6 +67,9 @@
 	// State for remove confirmation modal
 	let showRemoveConfirmModal = $state(false);
 	let collaboratorToRemove: Collaborator | null = $state(null);
+
+	// State for version history panel
+	let showVersionHistory = $state(false);
 
 	// Cursor and Presence state
 	let quillEditor: QuillEditor;
@@ -465,6 +469,29 @@
 		}, CURSOR_THROTTLE_INTERVAL);
 	}
 
+	// 還原版本後重新載入文件
+	async function handleVersionRestore() {
+		try {
+			const doc = await get(`/documents/${documentId}/`);
+			title = doc.title;
+			content = doc.content || { ops: [] };
+			// 更新編輯器內容
+			if (editor) {
+				editor.setContents(content, 'silent');
+			}
+			lastSavedTime = doc.updated_at;
+			saveStatus = 'saved';
+			setTimeout(() => {
+				if (saveStatus === 'saved') saveStatus = 'idle';
+			}, 2000);
+		} catch (error) {
+			console.error('Failed to reload document after restore:', error);
+			toast.push('Failed to reload document.', {
+				theme: errorTheme
+			});
+		}
+	}
+
 	onDestroy(() => {
 		// Send any pending delta before closing
 		if (pendingDelta && socket?.readyState === WebSocket.OPEN) {
@@ -535,6 +562,23 @@
 					{/if}
 				{/each}
 			</div>
+			<!-- 版本歷史按鈕 -->
+			<button
+				type="button"
+				class="history-button"
+				onclick={() => (showVersionHistory = true)}
+				title="版本歷史"
+				aria-label="版本歷史"
+			>
+				<svg class="history-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+					/>
+				</svg>
+			</button>
 			{#if isOwner}
 				<button onclick={() => (showShareModal = true)} class="share-button">
 					<svg
@@ -644,6 +688,13 @@
 		</div>
 	</div>
 {/if}
+
+<!-- 版本歷史面板 -->
+<VersionHistoryPanel
+	documentId={documentId}
+	bind:isOpen={showVersionHistory}
+	onRestore={handleVersionRestore}
+/>
 
 <style>
 	.page-container {
@@ -995,5 +1046,30 @@
 	.user-avatar:hover {
 		transform: scale(1.1);
 		transition: transform 0.15s ease;
+	}
+
+	/* History button */
+	.history-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.5rem;
+		background-color: transparent;
+		border: 1px solid #e2e8f0;
+		border-radius: 0.375rem;
+		color: #4a5568;
+		cursor: pointer;
+		transition: all 0.15s ease;
+	}
+
+	.history-button:hover {
+		background-color: #f7fafc;
+		color: #2d3748;
+		border-color: #cbd5e0;
+	}
+
+	.history-icon {
+		width: 1.25rem;
+		height: 1.25rem;
 	}
 </style>

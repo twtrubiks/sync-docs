@@ -190,3 +190,29 @@ class PresenceUser(Schema):
     username: str
     color: str
     cursor: Optional[CursorPosition] = None
+
+
+# ============ 版本歷史 Schema ============
+
+class VersionListItemSchema(Schema):
+    """版本列表項目"""
+    id: uuid.UUID
+    version_number: int
+    created_at: datetime
+    created_by_username: Optional[str] = None
+
+
+class VersionDetailSchema(Schema):
+    """版本詳情（含內容）"""
+    id: uuid.UUID
+    version_number: int
+    content: dict
+    created_at: datetime
+    created_by_username: Optional[str] = None
+
+
+class RestoreVersionResponseSchema(Schema):
+    """還原版本回應"""
+    success: bool
+    message: str
+    new_version_number: int

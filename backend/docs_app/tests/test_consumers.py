@@ -5,7 +5,7 @@ WebSocket消費者測試模組
 
 import json
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from django.contrib.auth.models import AnonymousUser
 from docs_app.consumers import DocConsumer, MAX_MESSAGE_SIZE, MAX_OPS_COUNT
 

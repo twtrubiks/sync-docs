@@ -4,7 +4,7 @@ from ninja_extra import api_controller, http_get, http_post, http_put, http_dele
 from ninja.errors import HttpError
 from django.shortcuts import get_object_or_404
 from django.http import Http404
-from .models import Document, DocumentCollaborator, PermissionLevel
+from .models import Document, DocumentCollaborator, DocumentVersion, PermissionLevel
 from typing import List
 from ninja_jwt.authentication import JWTAuth
 from ninja_extra.permissions import IsAuthenticated
@@ -13,7 +13,6 @@ from django.db.models import Q
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from .schemas import (
-    UserSchema,
     ShareRequestSchema,
     CollaboratorSchema,
     UpdateCollaboratorPermissionSchema,
@@ -21,6 +20,9 @@ from .schemas import (
     DocumentSchema,
     DocumentCreateSchema,
     DocumentUpdateSchema,
+    VersionListItemSchema,
+    VersionDetailSchema,
+    RestoreVersionResponseSchema,
 )
 
 # 獲取日誌記錄器
@@ -174,7 +176,7 @@ class DocumentController:
     def update_document(self, document_id: uuid.UUID, payload: DocumentUpdateSchema):
         """
         更新特定文檔（需要編輯權限）
-        同時向協作者廣播更新事件
+        同時向協作者廣播更新事件，內容變化時自動創建版本
 
         Args:
             document_id: 文檔的UUID
@@ -189,10 +191,20 @@ class DocumentController:
             document_id, user, require_write=True
         )
 
+        # 檢查內容是否有變化
+        content_changed = payload.content is not None and document.content != payload.content
+
         # 更新文檔屬性
         for attr, value in payload.dict(exclude_unset=True).items():
             setattr(document, attr, value)
         document.save()
+
+        # 內容變化時創建版本
+        if content_changed:
+            DocumentVersion.create_version(document, user)
+            # 清理舊版本
+            DocumentVersion.cleanup_old_versions(document, keep_count=50)
+            logger.info(f"用戶 {user.username} 更新文檔 {document_id} 並創建新版本")
 
         # 向文檔的頻道組廣播保存事件
         self._broadcast_document_saved(document)
@@ -361,3 +373,88 @@ class DocumentController:
 
         logger.info(f"用戶 {user.username} 移除協作者 {username}")
         return {"success": True}
+
+    # ============ 版本歷史相關 API ============
+
+    @http_get("/{document_id}/versions/", response=List[VersionListItemSchema])
+    def list_versions(self, document_id: uuid.UUID):
+        """
+        列出文件的所有版本
+
+        Args:
+            document_id: 文檔的UUID
+
+        Returns:
+            List[VersionListItemSchema]: 版本列表（最多50個，按版本號降序排列）
+        """
+        user = self.context.request.auth
+        # 使用現有的權限檢查方法
+        document = self._get_document_with_permission_check(document_id, user)
+
+        versions = DocumentVersion.objects.filter(
+            document=document
+        ).select_related('created_by').order_by('-version_number')[:50]
+
+        return versions
+
+    @http_get("/{document_id}/versions/{version_id}/", response=VersionDetailSchema)
+    def get_version(self, document_id: uuid.UUID, version_id: uuid.UUID):
+        """
+        獲取特定版本的詳細內容
+
+        Args:
+            document_id: 文檔的UUID
+            version_id: 版本的UUID
+
+        Returns:
+            VersionDetailSchema: 版本詳情（含完整內容）
+        """
+        user = self.context.request.auth
+        document = self._get_document_with_permission_check(document_id, user)
+
+        version = get_object_or_404(
+            DocumentVersion,
+            id=version_id,
+            document=document
+        )
+
+        return version
+
+    @http_post("/{document_id}/versions/{version_id}/restore/", response=RestoreVersionResponseSchema)
+    def restore_version(self, document_id: uuid.UUID, version_id: uuid.UUID):
+        """
+        還原到指定版本
+
+        Args:
+            document_id: 文檔的UUID
+            version_id: 版本的UUID
+
+        Returns:
+            RestoreVersionResponseSchema: 還原結果
+        """
+        user = self.context.request.auth
+        # 需要寫入權限
+        document = self._get_document_with_permission_check(
+            document_id, user, require_write=True
+        )
+
+        version = get_object_or_404(
+            DocumentVersion,
+            id=version_id,
+            document=document
+        )
+
+        # 還原 = 用舊版本覆蓋 + 創建新版本
+        document.content = version.content
+        document.save()
+
+        # 創建新版本記錄
+        new_version = DocumentVersion.create_version(document, user)
+
+        logger.info(f"用戶 {user.username} 將文檔 {document_id} 還原到版本 {version.version_number}，創建新版本 {new_version.version_number}")
+
+        return RestoreVersionResponseSchema(
+            success=True,
+            message=f"已還原到版本 {version.version_number}",
+            new_version_number=new_version.version_number
+        )

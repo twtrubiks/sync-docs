@@ -1,7 +1,7 @@
 import json
 import pytest
 from unittest.mock import patch, MagicMock
-from docs_app.models import Document, DocumentCollaborator, PermissionLevel
+from docs_app.models import Document
 
 # 使用 pytest-django 的 db fixture 來確保資料庫在測試之間是乾淨的
 pytestmark = pytest.mark.django_db

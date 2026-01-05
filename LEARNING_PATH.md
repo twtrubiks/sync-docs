@@ -73,7 +73,14 @@
   - `JSONField` 如何儲存 Quill Delta
   - `ForeignKey`（owner）vs `DocumentCollaborator` 中間模型（支援權限級別）
 
-**1.2 ORM 查詢練習**
+**1.2 版本歷史模型**
+- 閱讀檔案：`backend/docs_app/models.py`（DocumentVersion 部分）
+- 關鍵概念：
+  - 完整快照 vs Delta diff 方案的取捨
+  - `version_number` 自動遞增邏輯
+  - `cleanup_old_versions()` 清理舊版本機制
+
+**1.3 ORM 查詢練習**
 - 閱讀檔案：`backend/docs_app/migrations/`
 
 ```bash
@@ -117,10 +124,18 @@ Document.objects.filter(owner=user)
 - 繼續閱讀 `api.py` 的協作者相關端點
 - 理解分享功能的實作
 
+**2.5 版本歷史 API**
+- 閱讀檔案：`backend/docs_app/api.py`（版本相關端點）
+- 關鍵概念：
+  - 版本列表、詳情、還原三個端點
+  - `update_document` 自動創建版本的邏輯
+  - 還原版本時創建新版本的設計決策
+
 ### 階段檢查點
 - [ ] 能用 curl 或 Postman 測試註冊/登入 API
 - [ ] 能解碼 JWT Token 並理解其內容
 - [ ] 理解為什麼刪除操作需要 `owner_only=True`
+- [ ] 理解版本還原為什麼會創建新版本
 
 ---
 
@@ -155,11 +170,20 @@ Document.objects.filter(owner=user)
 - 閱讀檔案：`frontend/src/routes/(protected)/docs/[document_id]/+page.svelte`
 - 關鍵概念：Debounce 防抖、保存狀態機
 
+**3.5 版本歷史面板**
+- 閱讀檔案：`frontend/src/lib/components/VersionHistoryPanel.svelte`
+- 閱讀檔案：`frontend/src/lib/api/versions.ts`
+- 關鍵概念：
+  - 側邊面板 UI 設計
+  - `$effect()` 監聽 isOpen 變化載入版本
+  - 還原後重新載入文件的流程
+
 ### 階段檢查點
 - [ ] 理解 SvelteKit 檔案系統路由如何工作
 - [ ] 能解釋 Svelte 5 的 `$props()` 和 `$bindable()` 如何實現雙向綁定
 - [ ] 理解 `$state()`、`$derived()`、`$effect()` 的使用場景
 - [ ] 理解 Delta 的三種操作（insert, retain, delete）
+- [ ] 理解版本歷史面板如何與文件頁面整合
 
 ---
 
@@ -238,10 +262,18 @@ Document.objects.filter(owner=user)
 - 閱讀：`backend/docs_app/tests/test_consumers.py`
 - 關鍵概念：異步測試、`@pytest.mark.asyncio`
 
+**5.4 版本歷史測試**
+- 閱讀：`backend/docs_app/tests/test_version_history.py`
+- 關鍵概念：
+  - 模型方法測試（create_version、cleanup_old_versions）
+  - API 端點測試（list、detail、restore）
+  - 權限測試（只讀用戶無法還原）
+
 ### 階段檢查點
 - [ ] 能運行測試並看到覆蓋率報告
 - [ ] 理解 fixture 的作用
 - [ ] 能為新功能編寫測試
+- [ ] 理解版本歷史測試的覆蓋場景
 
 ---
 
@@ -303,7 +335,7 @@ Document.objects.filter(owner=user)
 
 ### 後續學習方向
 - 實作 OT (Operational Transformation) 解決衝突
-- 添加文件版本歷史、評論功能
+- 添加評論功能
 - 學習 Redis、Celery、Kubernetes
 
 ---

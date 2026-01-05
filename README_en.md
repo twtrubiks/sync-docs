@@ -26,6 +26,7 @@ This project was completed with assistance from [Cline](https://github.com/twtru
   * **Cursor Position Display**: Real-time display of collaborators' cursor positions and selections, using the quill-cursors package.
   * **Presence Indicators**: Show which users are currently viewing or editing the document, including usernames and colors.
   * **Rich Text Editing**: A clean and intuitive editor based on [Core Architecture of the Quill.js Delta Format](Delta_en.md), supporting various formatting options.
+  * **Version History**: Automatically saves document versions, allowing users to view history and restore to previous versions.
   * **User Authentication**: Secure user registration and login system.
   * **Document Management**: Users can create, view, and manage their documents from a personal dashboard.
   * **Document Sharing**: Easily share documents with other users for collaboration.
@@ -235,7 +236,6 @@ As an **educational demonstration project**, this project provides comprehensive
 
 This project is an MVP (Minimum Viable Product) with plenty of room for improvement. Here are some potential future features:
 
-  * **Document Version History**: Allow users to view and revert to previous versions of a document.
   * **Folder Organization**: Implement a folder system for better document management.
   * **Deployment**: Create a production-ready deployment setup using Docker, Gunicorn, and Nginx.
   * **Comprehensive Testing**: Add more unit and end-to-end tests to ensure stability.
