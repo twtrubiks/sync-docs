@@ -6,7 +6,7 @@ SyncDocs is a web-based collaborative document editor inspired by Google Docs, b
 
 This project leverages Django Ninja for a high-performance backend API and SvelteKit for a reactive and fast frontend user interface.
 
-This project was completed with assistance from Cline. For reference, see [.clinerules/MVP\_Development.md](.clinerules/MVP_Development.md)
+This project was completed with assistance from [Cline](https://github.com/twtrubiks/mcp-vscode-cline?tab=readme-ov-file#cline). For reference, see [.clinerules/MVP_Development.md](.clinerules/MVP_Development.md)
 
 ## Screenshots
 
@@ -23,6 +23,8 @@ This project was completed with assistance from Cline. For reference, see [.clin
 ## ✨ Key Features
 
   * **Real-time Collaboration**: Multiple users can edit the same document simultaneously, with changes reflected instantly for all participants, powered by Django Channels.
+  * **Cursor Position Display**: Real-time display of collaborators' cursor positions and selections, using the quill-cursors package.
+  * **Presence Indicators**: Show which users are currently viewing or editing the document, including usernames and colors.
   * **Rich Text Editing**: A clean and intuitive editor based on [Core Architecture of the Quill.js Delta Format](Delta_en.md), supporting various formatting options.
   * **User Authentication**: Secure user registration and login system.
   * **Document Management**: Users can create, view, and manage their documents from a personal dashboard.
@@ -75,15 +77,35 @@ Follow these steps to set up and run the project on your local machine.
   * [Node.js](https://nodejs.org/) 18+ and npm (or pnpm/yarn)
   * [Redis](https://redis.io/docs/getting-started/installation/) (for the real-time collaboration feature)
 
+### Environment Variables Setup
+
+Before starting, please copy the environment variable templates:
+
+```bash
+# Root directory (used by Docker Compose)
+cp .env.example .env
+
+# Frontend (used by SvelteKit, required for both Docker and local development)
+cp frontend/.env.example frontend/.env
+```
+
+> **Note**: `.env` files contain sensitive information and are included in `.gitignore`, so they won't be committed to version control.
+
 ### Quick Start (Using Docker, Recommended)
 
 ```bash
 docker compose up --build
 ```
 
+**Docker Environment Variables:**
+* Root `.env` → Read by Docker Compose → Injected into backend container
+* `frontend/.env` → Mounted to container → Read directly by SvelteKit
+
 ### Local Development (Without Docker)
 
-#### 1\. Backend Setup
+> **⚠️ Note**: Local development requires you to install and start PostgreSQL and Redis services yourself.
+
+## 1. Backend Setup
 
 ```bash
 # Navigate to the backend directory
@@ -104,13 +126,25 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-#### 2\. Frontend Setup
+**Backend Environment Variables:**
+
+For local development, Django uses default values in `settings.py`:
+
+* Default connection to `django-postgres:5432` (for Docker)
+* For local development, modify `POSTGRES_HOST=localhost`
+
+See `backend/.env.example` for available environment variables.
+
+## 2. Frontend Setup
 
 Open a new terminal window.
 
 ```bash
 # Navigate to the frontend directory
 cd frontend
+
+# Copy environment variable template (if not done already)
+cp .env.example .env
 
 # Install Node.js dependencies
 npm install
@@ -119,6 +153,17 @@ npm install
 # The frontend will be available at http://localhost:5173
 npm run dev -- --open
 ```
+
+**Frontend Environment Variables:**
+
+`frontend/.env` must exist, as SvelteKit reads this file directly:
+
+```env
+PUBLIC_API_URL=http://127.0.0.1:8000
+```
+
+* Variables with `PUBLIC_` prefix are exposed to the client
+* Restart the development server after modifications
 
 ### Accessing the Application
 
@@ -190,8 +235,6 @@ As an **educational demonstration project**, this project provides comprehensive
 
 This project is an MVP (Minimum Viable Product) with plenty of room for improvement. Here are some potential future features:
 
-  * **Presence Indicators**: Show which users are currently viewing or editing the document.
-  * **Cursor Presence**: Display collaborators' cursors in real-time.
   * **Document Version History**: Allow users to view and revert to previous versions of a document.
   * **Folder Organization**: Implement a folder system for better document management.
   * **Deployment**: Create a production-ready deployment setup using Docker, Gunicorn, and Nginx.
@@ -208,6 +251,9 @@ ECPay (No membership required)
 [Sponsor Link](http://bit.ly/2F7Jrha)
 
 O'Pay (Membership required)
+
+![alt tag](https://i.imgur.com/LRct9xa.png)
+
 [Sponsor Link](https://payment.opay.tw/Broadcaster/Donate/9E47FDEF85ABE383A0F5FC6A218606F8)
 
 ## List of Sponsors
@@ -216,4 +262,4 @@ O'Pay (Membership required)
 
 ## License
 
-[MIT license](https://www.google.com/search?q=LICENSE)
+MIT license

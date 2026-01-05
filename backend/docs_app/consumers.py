@@ -4,13 +4,16 @@ WebSocket消費者模組
 """
 
 import json
+import time
+import hashlib
 import logging
+import redis.asyncio as redis
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.conf import settings
 from pydantic import ValidationError as PydanticValidationError
 from .models import Document, DocumentCollaborator, PermissionLevel
-from .schemas import WebSocketMessageSchema
+from .schemas import WebSocketMessageSchema, CursorMoveMessage
 from .auth_middleware import AuthErrorType
 from .connection_manager import connection_manager
 from .rate_limiter import rate_limiter
@@ -21,6 +24,44 @@ logger = logging.getLogger('docs_app')
 # WebSocket 安全配置
 MAX_MESSAGE_SIZE = getattr(settings, 'WEBSOCKET_MAX_MESSAGE_SIZE', 256 * 1024)  # 256KB
 MAX_OPS_COUNT = getattr(settings, 'WEBSOCKET_MAX_OPS_COUNT', 1000)
+
+# Presence Redis 連接池
+_presence_redis_pool = None
+
+# Lua 腳本：原子性添加用戶到在線列表
+ADD_USER_SCRIPT = """
+local key = KEYS[1]
+local user_id = ARGV[1]
+local user_data = ARGV[2]
+local ttl = tonumber(ARGV[3])
+
+-- 添加/更新用戶
+redis.call('HSET', key, user_id, user_data)
+redis.call('EXPIRE', key, ttl)
+
+return 1
+"""
+
+# Lua 腳本：原子性移除用戶
+REMOVE_USER_SCRIPT = """
+local key = KEYS[1]
+local user_id = ARGV[1]
+
+redis.call('HDEL', key, user_id)
+return 1
+"""
+
+
+async def get_presence_redis():
+    """獲取 Presence Redis 連接（懶加載）"""
+    global _presence_redis_pool
+    if _presence_redis_pool is None:
+        _presence_redis_pool = redis.Redis(
+            host=getattr(settings, 'REDIS_HOST', 'django-redis'),
+            port=int(getattr(settings, 'REDIS_PORT', 6379)),
+            decode_responses=True
+        )
+    return _presence_redis_pool
 
 
 # WebSocket Close Codes (Application-specific: 4000-4999)
@@ -229,12 +270,32 @@ class DocConsumer(AsyncWebsocketConsumer):
         else:
             await self.accept()
 
-        # Step 5: 發送連接成功消息（包含權限信息）
+        # Step 5: 發送連接成功消息（包含權限信息和用戶顏色）
+        user_color = self.get_user_color(self.user.id)
         await self.send(text_data=json.dumps({
             'type': 'connection_success',
             'can_write': self.can_write,
+            'user_id': str(self.user.id),
+            'color': user_color,
             'message': 'Connected successfully'
         }))
+
+        # Step 6: 加入 Presence 列表
+        await self.add_user_to_presence()
+
+        # Step 7: 通知其他用戶有人加入
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                'type': 'user_join',
+                'user_id': str(self.user.id),
+                'username': self.user.username,
+                'color': user_color
+            }
+        )
+
+        # Step 8: 發送當前在線用戶列表給新加入者
+        await self.send_presence_sync()
 
         logger.info(f"用戶 {self.user.username} 成功連接到文檔 {self.document_id} (can_write: {self.can_write})")
 
@@ -284,6 +345,19 @@ class DocConsumer(AsyncWebsocketConsumer):
                 self.user.id, self.channel_name
             )
 
+            # 從 Presence 列表移除
+            await self.remove_user_from_presence()
+
+            # 通知其他用戶有人離開
+            if hasattr(self, 'room_group_name'):
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        'type': 'user_leave',
+                        'user_id': str(self.user.id)
+                    }
+                )
+
         # 離開房間組
         if hasattr(self, 'room_group_name'):
             await self.channel_layer.group_discard(
@@ -297,20 +371,36 @@ class DocConsumer(AsyncWebsocketConsumer):
         處理實時編輯的增量更新並廣播給其他用戶
 
         驗證流程：
-        0. 檢查寫入權限（只讀用戶不能發送編輯）
+        0. 解析 JSON 確定消息類型
+        0a. cursor_move 消息：不計入速率限制，單獨處理
+        0b. 其他消息類型：檢查寫入權限
         1. 速率限制檢查
         2. 檢查消息大小限制
-        3. JSON 解析
-        4. Pydantic Schema 驗證
-        5. 操作數量限制檢查
-        6. 廣播有效的 delta
+        3. Pydantic Schema 驗證
+        4. 操作數量限制檢查
+        5. 廣播有效的 delta
 
         Args:
             text_data: 接收到的JSON格式文本數據
         """
         username = getattr(self.user, 'username', 'Unknown')
 
-        # Step 0: 檢查寫入權限
+        # Step 0: 解析 JSON 確定消息類型
+        try:
+            text_data_json = json.loads(text_data)
+        except json.JSONDecodeError as e:
+            logger.error(f"用戶 {username} 發送了無效的JSON數據: {str(e)}")
+            await self._send_error("INVALID_JSON", "Invalid JSON format")
+            return
+
+        msg_type = text_data_json.get('type')
+
+        # cursor_move 消息：不計入速率限制（由前端 throttle 控制）
+        if msg_type == 'cursor_move':
+            await self.handle_cursor_move(text_data_json)
+            return
+
+        # Step 0b: 檢查寫入權限（非 cursor_move 消息）
         if not self.can_write:
             logger.warning(f"只讀用戶 {username} 嘗試發送 delta 到文檔 {self.document_id}")
             await self._send_error(
@@ -344,15 +434,7 @@ class DocConsumer(AsyncWebsocketConsumer):
             )
             return
 
-        # Step 3: JSON 解析
-        try:
-            text_data_json = json.loads(text_data)
-        except json.JSONDecodeError as e:
-            logger.error(f"用戶 {username} 發送了無效的JSON數據: {str(e)}")
-            await self._send_error("INVALID_JSON", "Invalid JSON format")
-            return
-
-        # Step 4: Pydantic Schema 驗證
+        # Step 3: Pydantic Schema 驗證（JSON 已在前面解析過）
         try:
             validated_message = WebSocketMessageSchema(**text_data_json)
             delta = validated_message.delta.model_dump()
@@ -451,3 +533,139 @@ class DocConsumer(AsyncWebsocketConsumer):
             logger.debug(f"向用戶 {self.user.username} 發送文檔保存通知")
         except Exception as e:
             logger.error(f"向用戶 {self.user.username} 發送文檔保存通知失敗: {str(e)}")
+
+    # ========== 游標與 Presence 功能 ==========
+
+    async def handle_cursor_move(self, data):
+        """處理游標位置更新"""
+        # 檢查寫入權限（只讀用戶不可發送游標更新）
+        if not self.can_write:
+            logger.debug(f"Read-only user {self.user.id} attempted cursor_move, ignoring")
+            return  # 靜默忽略，不發送錯誤
+
+        # 使用 Schema 驗證消息格式
+        try:
+            cursor_msg = CursorMoveMessage(**data)
+        except PydanticValidationError as e:
+            logger.warning(f"Invalid cursor_move message from {self.user.id}: {e}")
+            await self._send_error('INVALID_CURSOR_MESSAGE', str(e))
+            return
+
+        logger.debug(f"Cursor move from user {self.user.id}: index={cursor_msg.index}, length={cursor_msg.length}")
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                'type': 'cursor_update',
+                'user_id': str(self.user.id),
+                'username': self.user.username,
+                'color': self.get_user_color(self.user.id),
+                'cursor': {
+                    'index': cursor_msg.index,
+                    'length': cursor_msg.length
+                },
+                'timestamp': time.time(),
+                'sender_channel': self.channel_name
+            }
+        )
+
+        # 刷新 presence TTL，確保活躍用戶不會從在線列表消失
+        await self.refresh_presence_ttl()
+
+    async def cursor_update(self, event):
+        """廣播游標更新（排除發送者）"""
+        if self.channel_name != event.get('sender_channel'):
+            await self.send(text_data=json.dumps({
+                'type': 'cursor_move',
+                'user_id': event['user_id'],
+                'username': event['username'],
+                'color': event['color'],
+                'cursor': event['cursor'],
+                'timestamp': event['timestamp']
+            }))
+
+    async def user_join(self, event):
+        """廣播用戶加入（排除發送者自己，避免重複通知）"""
+        if str(self.user.id) != event['user_id']:
+            await self.send(text_data=json.dumps({
+                'type': 'user_join',
+                'user_id': event['user_id'],
+                'username': event['username'],
+                'color': event['color']
+            }))
+
+    async def user_leave(self, event):
+        """廣播用戶離開"""
+        await self.send(text_data=json.dumps({
+            'type': 'user_leave',
+            'user_id': event['user_id']
+        }))
+
+    @staticmethod
+    def get_user_color(user_id) -> str:
+        """根據 user_id 生成穩定的顏色"""
+        colors = [
+            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4',
+            '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F',
+            '#BB8FCE', '#85C1E9', '#F8B500', '#00CED1'
+        ]
+        hash_val = int(hashlib.md5(str(user_id).encode()).hexdigest(), 16)
+        return colors[hash_val % len(colors)]
+
+    # ========== Redis Presence 存儲方法 ==========
+
+    async def add_user_to_presence(self):
+        """將用戶加入 Redis 在線列表（使用 Lua 腳本確保原子性）"""
+        try:
+            r = await get_presence_redis()
+            key = f"presence:{self.document_id}"
+            user_data = json.dumps({
+                'user_id': str(self.user.id),
+                'username': self.user.username,
+                'color': self.get_user_color(self.user.id),
+                'channel_name': self.channel_name
+            })
+            # 使用 user_id 作為 field，5 分鐘過期
+            await r.eval(ADD_USER_SCRIPT, 1, key, str(self.user.id), user_data, 300)
+        except Exception as e:
+            logger.error(f"Failed to add user {self.user.id} to presence: {e}")
+            # fail-open: 不阻止連接
+
+    async def remove_user_from_presence(self):
+        """將用戶從 Redis 在線列表移除"""
+        try:
+            r = await get_presence_redis()
+            key = f"presence:{self.document_id}"
+            await r.eval(REMOVE_USER_SCRIPT, 1, key, str(self.user.id))
+        except Exception as e:
+            logger.error(f"Failed to remove user {self.user.id} from presence: {e}")
+            # fail-open: 記錄會在 TTL 後自動清除
+
+    async def refresh_presence_ttl(self):
+        """刷新用戶在 presence 列表中的 TTL，確保活躍用戶不會消失"""
+        try:
+            r = await get_presence_redis()
+            key = f"presence:{self.document_id}"
+            await r.expire(key, 300)  # 刷新 5 分鐘
+        except Exception as e:
+            logger.debug(f"Failed to refresh presence TTL: {e}")
+            # fail-open: TTL 刷新失敗不影響功能
+
+    async def get_online_users(self):
+        """獲取當前在線用戶列表"""
+        try:
+            r = await get_presence_redis()
+            key = f"presence:{self.document_id}"
+            users = await r.hgetall(key)
+            return [json.loads(v) for v in users.values()]
+        except Exception as e:
+            logger.error(f"Failed to get online users for document {self.document_id}: {e}")
+            return []  # fail-open: 返回空列表
+
+    async def send_presence_sync(self):
+        """發送當前在線用戶列表給新加入者"""
+        users = await self.get_online_users()
+        await self.send(text_data=json.dumps({
+            'type': 'presence_sync',
+            'users': users
+        }))

@@ -9,9 +9,8 @@ WebSocket 整合測試模組
 - Unicode 端到端傳輸
 """
 
-import pytest
-import json
 import asyncio
+import pytest
 from channels.testing import WebsocketCommunicator
 
 pytestmark = [
@@ -22,14 +21,58 @@ pytestmark = [
 
 async def consume_connection_success(communicator, timeout=2):
     """
-    消費並驗證 connection_success 訊息
+    消費並驗證 connection_success 訊息及後續的 presence_sync 訊息
 
-    連接成功後，伺服器會發送 connection_success 訊息，
-    測試需要先消費這個訊息才能進行後續操作。
+    連接成功後，伺服器會發送：
+    1. connection_success 訊息
+    2. presence_sync 訊息
+
+    測試需要先消費這些訊息才能進行後續操作。
     """
     response = await communicator.receive_json_from(timeout=timeout)
     assert response['type'] == 'connection_success'
+
+    # 消費 presence_sync（新功能）
+    presence_response = await communicator.receive_json_from(timeout=timeout)
+    assert presence_response['type'] == 'presence_sync'
+
     return response
+
+
+async def consume_initial_messages(communicator, timeout=2):
+    """
+    消費所有初始消息（connection_success, presence_sync, 可能的 user_join）
+
+    適用於多客戶端測試，返回所有收到的初始消息。
+    """
+    messages = []
+    response = await communicator.receive_json_from(timeout=timeout)
+    assert response['type'] == 'connection_success'
+    messages.append(response)
+
+    # 消費 presence_sync
+    presence_response = await communicator.receive_json_from(timeout=timeout)
+    assert presence_response['type'] == 'presence_sync'
+    messages.append(presence_response)
+
+    return messages
+
+
+async def consume_user_join_if_any(communicator, timeout=0.3):
+    """
+    嘗試消費 user_join 消息（如果有的話）
+
+    在多客戶端測試中，先連接的客戶端可能會收到 user_join 消息。
+    """
+    try:
+        msg = await asyncio.wait_for(
+            communicator.receive_json_from(), timeout=timeout
+        )
+        if msg.get('type') == 'user_join':
+            return msg
+        return None
+    except asyncio.TimeoutError:
+        return None
 
 
 class TestWebSocketConnection:
@@ -161,9 +204,12 @@ class TestWebSocketReadOnlyPermission:
             await comm_owner.connect()
             await comm_read_only.connect()
 
-            # 消費 connection_success
+            # 消費 connection_success 和 presence_sync
             owner_response = await consume_connection_success(comm_owner)
             read_only_response = await consume_connection_success(comm_read_only)
+
+            # 消費可能的 user_join
+            await consume_user_join_if_any(comm_owner)
 
             # 驗證只讀用戶 can_write=False
             assert owner_response['can_write'] is True
@@ -209,9 +255,12 @@ class TestWebSocketReadOnlyPermission:
             await comm_owner.connect()
             await comm_read_only.connect()
 
-            # 消費 connection_success
+            # 消費 connection_success 和 presence_sync
             await consume_connection_success(comm_owner)
             await consume_connection_success(comm_read_only)
+
+            # 消費可能的 user_join
+            await consume_user_join_if_any(comm_owner)
 
             # 擁有者發送 delta
             await comm_owner.send_json_to({
@@ -265,9 +314,12 @@ class TestWebSocketBroadcast:
             assert connected_owner is True
             assert connected_collaborator is True
 
-            # 消費 connection_success 訊息
+            # 消費 connection_success 和 presence_sync 訊息
             await consume_connection_success(comm_owner)
             await consume_connection_success(comm_collaborator)
+
+            # 消費 owner 可能收到的 user_join（collaborator 加入）
+            await consume_user_join_if_any(comm_owner)
 
             # 擁有者發送 delta
             delta_message = {
@@ -313,9 +365,12 @@ class TestWebSocketBroadcast:
             await comm_owner.connect()
             await comm_collaborator.connect()
 
-            # 消費 connection_success 訊息
+            # 消費 connection_success 和 presence_sync 訊息
             await consume_connection_success(comm_owner)
             await consume_connection_success(comm_collaborator)
+
+            # 消費 owner 可能收到的 user_join
+            await consume_user_join_if_any(comm_owner)
 
             # 擁有者發送 delta
             delta_message = {
@@ -368,10 +423,15 @@ class TestWebSocketBroadcast:
             await comm_2.connect()
             await comm_3.connect()
 
-            # 消費 connection_success 訊息
+            # 消費 connection_success 和 presence_sync 訊息
             await consume_connection_success(comm_1)
             await consume_connection_success(comm_2)
             await consume_connection_success(comm_3)
+
+            # 消費可能的 user_join 消息
+            await consume_user_join_if_any(comm_1)
+            await consume_user_join_if_any(comm_1)  # 可能收到兩個 user_join
+            await consume_user_join_if_any(comm_2)
 
             # 客戶端 1 發送
             delta_message = {
@@ -430,9 +490,12 @@ class TestWebSocketConcurrency:
             await comm_sender.connect()
             await comm_receiver.connect()
 
-            # 消費 connection_success 訊息
+            # 消費 connection_success 和 presence_sync 訊息
             await consume_connection_success(comm_sender)
             await consume_connection_success(comm_receiver)
+
+            # 消費可能的 user_join
+            await consume_user_join_if_any(comm_sender)
 
             # 快速發送 10 個消息
             num_messages = 10
@@ -527,9 +590,12 @@ class TestWebSocketUnicode:
             await comm_sender.connect()
             await comm_receiver.connect()
 
-            # 消費 connection_success 訊息
+            # 消費 connection_success 和 presence_sync 訊息
             await consume_connection_success(comm_sender)
             await consume_connection_success(comm_receiver)
+
+            # 消費可能的 user_join
+            await consume_user_join_if_any(comm_sender)
 
             # 發送包含中文和 emoji 的消息
             unicode_text = "Hello 世界! 你好 🎉🚀💻 繁體中文測試"
@@ -571,9 +637,12 @@ class TestWebSocketUnicode:
             await comm_sender.connect()
             await comm_receiver.connect()
 
-            # 消費 connection_success 訊息
+            # 消費 connection_success 和 presence_sync 訊息
             await consume_connection_success(comm_sender)
             await consume_connection_success(comm_receiver)
+
+            # 消費可能的 user_join
+            await consume_user_join_if_any(comm_sender)
 
             # 發送包含特殊符號的消息
             special_text = "Symbols: ©®™ <script> &nbsp; \"quotes\" 'apostrophe' \t\n"

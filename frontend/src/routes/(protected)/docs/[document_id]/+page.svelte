@@ -6,6 +6,7 @@
 	import { get, put, del, post, logout, type Collaborator } from '$lib/auth';
 	import { toast } from '@zerodevx/svelte-toast';
 	import type { QuillDelta, QuillType } from '$lib/types/quill';
+	import type { PresenceUser } from '$lib/types/cursor';
 	import Delta from 'quill-delta';
 
 	// WebSocket Close Codes（與後端對應）
@@ -65,6 +66,16 @@
 	// State for remove confirmation modal
 	let showRemoveConfirmModal = $state(false);
 	let collaboratorToRemove: Collaborator | null = $state(null);
+
+	// Cursor and Presence state
+	let quillEditor: QuillEditor;
+	let onlineUsers = $state<Map<string, PresenceUser>>(new Map());
+	let currentUserId = $state<string | null>(null);
+
+	// Cursor change throttle state
+	let cursorThrottleTimer: ReturnType<typeof setTimeout> | null = $state(null);
+	let pendingCursor: { index: number; length: number } | null = $state(null);
+	const CURSOR_THROTTLE_INTERVAL = 150; // ms
 
 	async function getCollaborators() {
 		try {
@@ -241,7 +252,8 @@
 					case 'connection_success':
 						// Update permission from WebSocket connection
 						canWrite = data.can_write;
-						console.log(`WebSocket connected, can_write: ${canWrite}`);
+						currentUserId = data.user_id;
+						console.log(`WebSocket connected, can_write: ${canWrite}, user_id: ${currentUserId}`);
 						break;
 					case 'doc_update':
 						if (data.delta && editor) {
@@ -259,6 +271,38 @@
 							}
 						}
 						break;
+					case 'cursor_move':
+						// 更新其他用戶的游標
+						quillEditor?.setCursor(data.user_id, data.username, data.color, data.cursor);
+						break;
+					case 'user_join':
+						// 用戶加入
+						onlineUsers.set(data.user_id, {
+							user_id: data.user_id,
+							username: data.username,
+							color: data.color
+						});
+						onlineUsers = new Map(onlineUsers); // Svelte 5: 創建新 Map 觸發響應式
+						break;
+					case 'user_leave':
+						// 用戶離開
+						onlineUsers.delete(data.user_id);
+						onlineUsers = new Map(onlineUsers); // Svelte 5: 創建新 Map 觸發響應式
+						quillEditor?.removeCursor(data.user_id);
+						break;
+					case 'presence_sync': {
+						// 同步在線用戶列表
+						const newMap = new Map<string, PresenceUser>();
+						for (const user of data.users) {
+							newMap.set(user.user_id, {
+								user_id: user.user_id,
+								username: user.username,
+								color: user.color
+							});
+						}
+						onlineUsers = newMap; // Svelte 5: 創建新 Map 觸發響應式
+						break;
+					}
 					case 'connection_error':
 						// 連接錯誤會在 onclose 之前收到，記錄到 console
 						console.warn('WebSocket connection error:', data.error_code, data.message);
@@ -395,6 +439,32 @@
 		debouncedSave();
 	}
 
+	// 游標變化處理（Trailing Edge Throttle）
+	function handleSelectionChange(range: { index: number; length: number } | null) {
+		if (!range || !socket || socket.readyState !== WebSocket.OPEN || !canWrite) return;
+
+		// 記錄最新游標位置
+		pendingCursor = range;
+
+		// Trailing edge throttle：等待後發送最新值
+		if (cursorThrottleTimer) return;
+
+		cursorThrottleTimer = setTimeout(() => {
+			// 重新檢查 ws 狀態
+			if (pendingCursor && socket && socket.readyState === WebSocket.OPEN) {
+				socket.send(
+					JSON.stringify({
+						type: 'cursor_move',
+						index: pendingCursor.index,
+						length: pendingCursor.length
+					})
+				);
+				pendingCursor = null;
+			}
+			cursorThrottleTimer = null;
+		}, CURSOR_THROTTLE_INTERVAL);
+	}
+
 	onDestroy(() => {
 		// Send any pending delta before closing
 		if (pendingDelta && socket?.readyState === WebSocket.OPEN) {
@@ -408,6 +478,9 @@
 		}
 		clearTimeout(debounceTimeout);
 		clearTimeout(throttleTimeout);
+		if (cursorThrottleTimer) {
+			clearTimeout(cursorThrottleTimer);
+		}
 	});
 </script>
 
@@ -448,6 +521,20 @@
 			</div>
 		</div>
 		<div class="header-right">
+			<!-- 在線用戶頭像 -->
+			<div class="online-users">
+				{#each [...onlineUsers.entries()] as [userId, user]}
+					{#if userId !== currentUserId}
+						<div
+							class="user-avatar"
+							style="background-color: {user.color}"
+							title={user.username}
+						>
+							{user.username.charAt(0).toUpperCase()}
+						</div>
+					{/if}
+				{/each}
+			</div>
 			{#if isOwner}
 				<button onclick={() => (showShareModal = true)} class="share-button">
 					<svg
@@ -472,9 +559,11 @@
 		<div class="editor-wrapper">
 			<!-- Svelte 5: Use onTextChange callback prop instead of on:text-change event -->
 			<QuillEditor
+				bind:this={quillEditor}
 				bind:value={content}
 				bind:editor
 				onTextChange={handleContentChange}
+				onSelectionChange={handleSelectionChange}
 				disabled={!canWrite}
 			/>
 		</div>
@@ -878,5 +967,33 @@
 	.permission-badge.read {
 		background-color: #e0e7ff; /* indigo-100 */
 		color: #3730a3; /* indigo-800 */
+	}
+
+	/* Online users avatars */
+	.online-users {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		margin-right: 1rem;
+	}
+
+	.user-avatar {
+		width: 2rem;
+		height: 2rem;
+		border-radius: 50%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: white;
+		font-size: 0.875rem;
+		font-weight: 600;
+		border: 2px solid white;
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+		cursor: default;
+	}
+
+	.user-avatar:hover {
+		transform: scale(1.1);
+		transition: transform 0.15s ease;
 	}
 </style>

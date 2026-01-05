@@ -275,6 +275,10 @@ class TestRateLimiting:
             response = await communicator.receive_json_from(timeout=2)
             assert response['type'] == 'connection_success'
 
+            # 消費 presence_sync 訊息
+            presence_response = await communicator.receive_json_from(timeout=2)
+            assert presence_response['type'] == 'presence_sync'
+
             # Mock rate_limiter 允許所有消息
             with patch(
                 'docs_app.consumers.rate_limiter.is_allowed',
@@ -315,6 +319,10 @@ class TestRateLimiting:
             # 消費 connection_success 訊息
             response = await communicator.receive_json_from(timeout=2)
             assert response['type'] == 'connection_success'
+
+            # 消費 presence_sync 訊息
+            presence_response = await communicator.receive_json_from(timeout=2)
+            assert presence_response['type'] == 'presence_sync'
 
             # Mock rate_limiter 拒絕消息
             with patch(

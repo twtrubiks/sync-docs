@@ -200,10 +200,22 @@ Document.objects.filter(owner=user)
 - 閱讀：`backend/docs_app/api.py` 的 `_broadcast_document_saved` 方法
 - 理解 HTTP API 和 WebSocket 的配合
 
+**4.6 游標與在線狀態（Cursor Presence）**
+- 閱讀檔案：`backend/docs_app/consumers.py` 的 `handle_cursor_move`、`add_presence`、`remove_presence` 方法
+- 閱讀檔案：`frontend/src/lib/components/QuillEditor.svelte` 的 `setCursor`、`removeCursor` 方法
+- 關鍵概念：
+  - WebSocket 消息類型：`cursor_move`、`user_join`、`user_leave`、`presence_sync`
+  - Redis Hash 管理在線用戶（`presence:{document_id}`）
+  - TTL 機制確保活躍用戶不會消失
+  - quill-cursors 套件整合（CSS 定位要點）
+  - Svelte 5 Map 響應式注意事項（需創建新 Map 觸發更新）
+
 ### 階段檢查點
 - [ ] 能解釋為什麼即時協作需要 WebSocket 而不是輪詢
 - [ ] 理解 `self.channel_name` 和 `self.room_group_name` 的區別
 - [ ] 能解釋 Delta 同步中如何避免無限循環
+- [ ] 理解 cursor_move 為什麼不發回給發送者
+- [ ] 能解釋 TTL 刷新機制的作用
 
 ---
 
