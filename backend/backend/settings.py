@@ -22,15 +22,18 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
+# TODO: 正式環境請設定安全的 DJANGO_SECRET_KEY
 SECRET_KEY = os.environ.get(
     'DJANGO_SECRET_KEY',
     'django-insecure-5#f#=%9ype@jky*cizeegw8kc94+4v1_-%^-r7dfy*ds^-txuu'
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
+# TODO: 正式環境請設定 DJANGO_DEBUG=False
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
 
 # 在生產環境中應該設置具體的主機名
+# TODO: 正式環境請設定 DJANGO_ALLOWED_HOSTS 為具體域名
 ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', '*').split(',')
 
 
@@ -138,6 +141,7 @@ REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 # }
 
 # PostgreSQL database configuration using environment variables
+# TODO: 正式環境請設定安全的 POSTGRES_PASSWORD
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql_psycopg2",
@@ -212,6 +216,12 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = 31536000  # 1 year
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
+    # SSL/HTTPS 設定
+    SECURE_SSL_REDIRECT = os.environ.get(
+        'SECURE_SSL_REDIRECT', 'True'
+    ).lower() in ('true', '1', 'yes')
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 # 日誌配置
 LOGGING = {

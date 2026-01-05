@@ -1,2 +1,5 @@
 .claude/
 CLAUDE.md
+.env
+.env.*
+!.env.example

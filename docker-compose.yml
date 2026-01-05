@@ -24,6 +24,17 @@ services:
       restart: always
       ports:
         - "8000:8000"
+      environment:
+        # TODO: 正式環境請更換為安全密鑰和密碼
+        - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:-django-insecure-dev-only-key}
+        - DJANGO_DEBUG=${DJANGO_DEBUG:-True}
+        - DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS:-*}
+        - POSTGRES_HOST=django-postgres
+        - POSTGRES_DB=${POSTGRES_DB:-postgres}
+        - POSTGRES_USER=${POSTGRES_USER:-myuser}
+        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password123}
+        - REDIS_HOST=django-redis
+        - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
       depends_on:
         - django-postgres
         - django-redis
@@ -33,9 +44,10 @@ services:
       # ports:
       #   - "5432:5432"
       environment:
-        - POSTGRES_DB=postgres
-        - POSTGRES_USER=myuser
-        - POSTGRES_PASSWORD=password123
+        # TODO: 正式環境請更換為安全密碼
+        - POSTGRES_DB=${POSTGRES_DB:-postgres}
+        - POSTGRES_USER=${POSTGRES_USER:-myuser}
+        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password123}
         - PGDATA=/var/lib/postgresql/data/pgdata
       volumes:
         - db-data:/var/lib/postgresql/data/pgdata

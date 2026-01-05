@@ -75,13 +75,33 @@ SyncDocs 是一款受 Google Docs 啟發、基於現代技術堆疊打造的網�
 * [Node.js](https://nodejs.org/) 18+ 和 npm (或 pnpm/yarn)
 * [Redis](https://redis.io/docs/getting-started/installation/) (用於即時協作功能)
 
+### 環境變數設定
+
+在開始之前，請先複製環境變數範本：
+
+```bash
+# 根目錄（Docker Compose 使用）
+cp .env.example .env
+
+# 前端（SvelteKit 使用，Docker 和本地開發都需要）
+cp frontend/.env.example frontend/.env
+```
+
+> **注意**：`.env` 檔案包含敏感資訊，已加入 `.gitignore`，不會被提交到版本控制。
+
 ### 快速啟動 (使用 Docker, 建議用這個)
 
 ```cmd
 docker compose up --build
 ```
 
+**Docker 環境變數說明：**
+* 根目錄 `.env` → Docker Compose 讀取 → 注入到 backend container
+* `frontend/.env` → 掛載到 container → SvelteKit 直接讀取
+
 ### 本地開發 (不使用 Docker)
+
+> **⚠️ 注意**：本地開發需要自行安裝並啟動 PostgreSQL 和 Redis 服務。
 
 ## 1. 後端設定
 
@@ -104,6 +124,15 @@ python manage.py migrate
 python manage.py runserver
 ```
 
+**後端環境變數說明：**
+
+本地開發時，Django 會使用 `settings.py` 中的預設值：
+
+* 預設連接 `django-postgres:5432`（適合 Docker）
+* 本地開發需修改 `POSTGRES_HOST=localhost`
+
+可用的環境變數請參考 `backend/.env.example`。
+
 ## 2. 前端設定
 
 開啟一個新的終端機視窗。
@@ -112,6 +141,9 @@ python manage.py runserver
 # 前往 frontend 目錄
 cd frontend
 
+# 複製環境變數範本（如果還沒做的話）
+cp .env.example .env
+
 # 安裝 Node.js 依賴套件
 npm install
 
@@ -119,6 +151,17 @@ npm install
 # 前端將可在 http://localhost:5173 取得
 npm run dev -- --open
 ```
+
+**前端環境變數說明：**
+
+`frontend/.env` 必須存在，SvelteKit 會直接讀取此檔案：
+
+```env
+PUBLIC_API_URL=http://127.0.0.1:8000
+```
+
+* `PUBLIC_` 前綴的變數會暴露給客戶端
+* 修改後需重新啟動開發伺服器
 
 ### 存取應用程式
 
