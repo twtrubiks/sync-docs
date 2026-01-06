@@ -3,10 +3,12 @@ WebSocket消費者模組
 處理實時協作功能的WebSocket連接和消息傳遞
 """
 
-import json
-import time
+import asyncio
 import hashlib
+import json
 import logging
+import time
+
 import redis.asyncio as redis
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
@@ -24,6 +26,9 @@ logger = logging.getLogger('docs_app')
 # WebSocket 安全配置
 MAX_MESSAGE_SIZE = getattr(settings, 'WEBSOCKET_MAX_MESSAGE_SIZE', 256 * 1024)  # 256KB
 MAX_OPS_COUNT = getattr(settings, 'WEBSOCKET_MAX_OPS_COUNT', 1000)
+
+# 心跳間隔（秒）- 用於刷新連接 TTL
+HEARTBEAT_INTERVAL = getattr(settings, 'WEBSOCKET_HEARTBEAT_INTERVAL', 120)  # 2 分鐘
 
 # Presence Redis 連接池
 _presence_redis_pool = None
@@ -297,6 +302,9 @@ class DocConsumer(AsyncWebsocketConsumer):
         # Step 8: 發送當前在線用戶列表給新加入者
         await self.send_presence_sync()
 
+        # Step 9: 啟動心跳任務，定期刷新連接 TTL
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
         logger.info(f"用戶 {self.user.username} 成功連接到文檔 {self.document_id} (can_write: {self.can_write})")
 
     async def _reject_connection(self, error_code: str, error_message: str, close_code: int):
@@ -338,6 +346,14 @@ class DocConsumer(AsyncWebsocketConsumer):
             close_code: 連接關閉代碼
         """
         logger.info(f"用戶 {self.user.username if hasattr(self, 'user') and self.user else 'Unknown'} 斷開與文檔 {getattr(self, 'document_id', 'Unknown')} 的連接")
+
+        # 取消心跳任務
+        if hasattr(self, '_heartbeat_task'):
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
 
         # 移除連接記錄
         if hasattr(self, 'user') and self.user and self.user.is_authenticated:
@@ -669,3 +685,30 @@ class DocConsumer(AsyncWebsocketConsumer):
             'type': 'presence_sync',
             'users': users
         }))
+
+    # ========== 心跳機制 ==========
+
+    async def _heartbeat_loop(self):
+        """
+        心跳循環：定期刷新連接 TTL
+
+        這確保活躍的連接不會因為 TTL 過期而被誤認為斷開。
+        如果連接真的斷開，這個 task 會被取消，TTL 會自然過期。
+        """
+        try:
+            while True:
+                await asyncio.sleep(HEARTBEAT_INTERVAL)
+
+                # 刷新連接 TTL
+                try:
+                    if hasattr(self, 'user') and self.user.is_authenticated:
+                        await connection_manager.refresh_connection(
+                            self.user.id, self.channel_name
+                        )
+                        logger.debug(f"心跳：刷新用戶 {self.user.id} 的連接 TTL")
+                except Exception as e:
+                    # 記錄錯誤但繼續循環，不中斷心跳
+                    logger.error(f"心跳刷新發生錯誤: {str(e)}")
+        except asyncio.CancelledError:
+            # 正常取消，不需要記錄錯誤
+            pass

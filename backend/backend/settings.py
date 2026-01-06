@@ -116,6 +116,16 @@ WEBSOCKET_MAX_CONNECTIONS_PER_USER = int(
     os.environ.get('WEBSOCKET_MAX_CONNECTIONS_PER_USER', 5)
 )
 
+# 連接 TTL（秒）- 5 分鐘，與 presence 系統一致
+WEBSOCKET_CONNECTION_TTL = int(
+    os.environ.get('WEBSOCKET_CONNECTION_TTL', 300)
+)
+
+# 心跳間隔（秒）- 用於刷新連接 TTL
+WEBSOCKET_HEARTBEAT_INTERVAL = int(
+    os.environ.get('WEBSOCKET_HEARTBEAT_INTERVAL', 120)
+)
+
 # 速率限制（滑動窗口）
 WEBSOCKET_RATE_LIMIT_MESSAGES = int(
     os.environ.get('WEBSOCKET_RATE_LIMIT_MESSAGES', 30)

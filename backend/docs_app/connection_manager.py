@@ -3,7 +3,9 @@ WebSocket 連接管理器
 使用 Redis 追蹤並限制用戶連接數
 """
 
+import asyncio
 import logging
+
 import redis.asyncio as redis
 from django.conf import settings
 
@@ -20,6 +22,12 @@ class ConnectionManager:
 
     使用 Lua 腳本確保操作原子性
     """
+
+    # 連接記錄 TTL（秒）- 5 分鐘，與 presence 系統一致
+    CONNECTION_TTL = int(getattr(settings, 'WEBSOCKET_CONNECTION_TTL', 300))
+
+    # 移除連接時的最大重試次數
+    REMOVE_MAX_RETRIES = 3
 
     def __init__(self):
         self.redis_host = getattr(settings, 'REDIS_HOST', 'django-redis')
@@ -79,20 +87,22 @@ class ConnectionManager:
         local key = KEYS[1]
         local channel = ARGV[1]
         local max_conn = tonumber(ARGV[2])
+        local ttl = tonumber(ARGV[3])
 
         local count = redis.call('SCARD', key)
         if count >= max_conn then
             return 0
         end
         redis.call('SADD', key, channel)
-        -- 設置 24 小時過期，防止異常情況下的數據殘留
-        redis.call('EXPIRE', key, 86400)
+        -- 設置 TTL 過期，防止異常情況下的數據殘留
+        redis.call('EXPIRE', key, ttl)
         return 1
         """
 
         try:
             result = await r.eval(
-                lua_script, 1, key, channel_name, self.max_connections
+                lua_script, 1, key,
+                channel_name, self.max_connections, self.CONNECTION_TTL
             )
             success = result == 1
 
@@ -110,27 +120,41 @@ class ConnectionManager:
             return success
         except Exception as e:
             logger.error(f"添加連接時發生錯誤: {str(e)}")
-            # 發生錯誤時允許連接（fail-open），避免影響正常使用
-            return True
+            # 發生錯誤時拒絕連接（fail-closed），確保連接追蹤一致性
+            return False
 
     async def remove_connection(self, user_id: int, channel_name: str):
         """
-        移除連接
+        移除連接（帶重試邏輯）
 
         Args:
             user_id: 用戶 ID
             channel_name: WebSocket channel 名稱
         """
-        try:
-            r = await self.get_redis()
-            key = self._get_key(user_id)
-            await r.srem(key, channel_name)
-            logger.debug(
-                f"用戶 {user_id} 移除連接 {channel_name}，"
-                f"剩餘連接數: {await self.get_connection_count(user_id)}"
-            )
-        except Exception as e:
-            logger.error(f"移除連接時發生錯誤: {str(e)}")
+        for attempt in range(self.REMOVE_MAX_RETRIES):
+            try:
+                r = await self.get_redis()
+                key = self._get_key(user_id)
+                await r.srem(key, channel_name)
+                logger.debug(
+                    f"用戶 {user_id} 移除連接 {channel_name}，"
+                    f"剩餘連接數: {await self.get_connection_count(user_id)}"
+                )
+                return  # 成功，退出
+            except Exception as e:
+                logger.error(
+                    f"移除連接時發生錯誤 (嘗試 {attempt + 1}/{self.REMOVE_MAX_RETRIES}): "
+                    f"{str(e)}"
+                )
+                if attempt < self.REMOVE_MAX_RETRIES - 1:
+                    # 指數退避重試
+                    await asyncio.sleep(0.1 * (attempt + 1))
+
+        # 所有重試都失敗
+        logger.warning(
+            f"無法移除用戶 {user_id} 的連接 {channel_name}，"
+            f"已重試 {self.REMOVE_MAX_RETRIES} 次"
+        )
 
     async def get_connection_count(self, user_id: int) -> int:
         """
@@ -164,6 +188,27 @@ class ConnectionManager:
             logger.info(f"已清除用戶 {user_id} 的所有連接記錄")
         except Exception as e:
             logger.error(f"清除連接記錄時發生錯誤: {str(e)}")
+
+    async def refresh_connection(self, user_id: int, channel_name: str):
+        """
+        刷新連接 TTL（心跳用）
+
+        當連接活躍時調用此方法延長 TTL，防止活躍連接因 TTL 過期被清除。
+
+        Args:
+            user_id: 用戶 ID
+            channel_name: WebSocket channel 名稱
+        """
+        try:
+            r = await self.get_redis()
+            key = self._get_key(user_id)
+
+            # 只有當 channel 存在時才刷新 TTL
+            if await r.sismember(key, channel_name):
+                await r.expire(key, self.CONNECTION_TTL)
+                logger.debug(f"刷新用戶 {user_id} 的連接 TTL")
+        except Exception as e:
+            logger.error(f"刷新連接 TTL 時發生錯誤: {str(e)}")
 
 
 # 全局實例

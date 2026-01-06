@@ -187,7 +187,28 @@ def jwt_token_for_nonexistent_user():
 
 
 @pytest.fixture
-def websocket_application(settings):
+def mock_connection_manager():
+    """
+    Mock connection_manager 以避免測試時的 Redis 依賴。
+    所有連線操作都會成功，不實際連接 Redis。
+    """
+    from unittest.mock import patch, AsyncMock
+    from docs_app import connection_manager as cm_module
+
+    # 創建 async mock 函數
+    async_true = AsyncMock(return_value=True)
+    async_none = AsyncMock(return_value=None)
+
+    # Mock 所有 async 方法
+    with patch.object(cm_module.connection_manager, 'add_connection', async_true), \
+         patch.object(cm_module.connection_manager, 'remove_connection', async_none), \
+         patch.object(cm_module.connection_manager, 'refresh_connection', async_none), \
+         patch.object(cm_module.connection_manager, 'get_connection_count', AsyncMock(return_value=0)):
+        yield cm_module.connection_manager
+
+
+@pytest.fixture
+def websocket_application(settings, mock_connection_manager):
     """
     WebSocket ASGI 應用，使用 InMemoryChannelLayer 避免 Redis 依賴
     """
