@@ -198,6 +198,8 @@ def websocket_application(settings):
         }
     }
 
+    # 延遲 import：必須在修改 settings.CHANNEL_LAYERS 後才 import，
+    # 因為這些模組在 import 時會讀取 channel layer 設定
     from channels.routing import ProtocolTypeRouter, URLRouter
     from docs_app.auth_middleware import JWTAuthMiddleware
     import docs_app.routing

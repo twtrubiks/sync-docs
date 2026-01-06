@@ -20,12 +20,14 @@ from ninja_extra import NinjaExtraAPI
 from ninja_jwt.controller import NinjaJWTDefaultController
 from docs_app.api import DocumentController
 from docs_app.auth_api import AuthController
+from docs_app.ai_api import AIController
 
 api = NinjaExtraAPI()
 
 api.register_controllers(NinjaJWTDefaultController)
 api.register_controllers(DocumentController)
 api.register_controllers(AuthController)
+api.register_controllers(AIController)
 
 
 urlpatterns = [

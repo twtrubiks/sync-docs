@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import QuillEditor from '$lib/components/QuillEditor.svelte';
 	import VersionHistoryPanel from '$lib/components/VersionHistoryPanel.svelte';
+	import AIDialog from '$lib/components/AIDialog.svelte';
 	import { get, put, del, post, logout, type Collaborator } from '$lib/auth';
 	import { toast } from '@zerodevx/svelte-toast';
 	import type { QuillDelta, QuillType } from '$lib/types/quill';
@@ -80,6 +81,12 @@
 	let cursorThrottleTimer: ReturnType<typeof setTimeout> | null = $state(null);
 	let pendingCursor: { index: number; length: number } | null = $state(null);
 	const CURSOR_THROTTLE_INTERVAL = 150; // ms
+
+	// AI Dialog state
+	let showAIDialog = $state(false);
+	let selectedTextForAI = $state('');
+	let savedSelection = $state<{ index: number; length: number } | null>(null);
+	let savedOriginalText = $state(''); // For conflict detection
 
 	async function getCollaborators() {
 		try {
@@ -469,6 +476,51 @@
 		}, CURSOR_THROTTLE_INTERVAL);
 	}
 
+	// Open AI Dialog
+	function openAIDialog() {
+		if (!editor) return;
+
+		const selection = editor.getSelection();
+		if (!selection || selection.length === 0) {
+			toast.push('Please select text first', { theme: warningTheme });
+			return;
+		}
+
+		// Save selection range and original text
+		savedSelection = { index: selection.index, length: selection.length };
+		savedOriginalText = editor.getText(selection.index, selection.length);
+		selectedTextForAI = savedOriginalText;
+		showAIDialog = true;
+	}
+
+	// Apply AI result
+	function applyAIResult(newText: string) {
+		if (!editor || !savedSelection) return;
+
+		// Conflict detection: check if original text was modified by others
+		const currentText = editor.getText(savedSelection.index, savedSelection.length);
+		if (currentText !== savedOriginalText) {
+			toast.push('Text was modified. Please reselect.', { theme: warningTheme });
+			savedSelection = null;
+			savedOriginalText = '';
+			return;
+		}
+
+		// Get original formatting, preserve it when applying result
+		const formats = editor.getFormat(savedSelection.index, savedSelection.length);
+
+		// Replace text using saved selection (preserve original formatting)
+		editor.deleteText(savedSelection.index, savedSelection.length, 'user');
+		editor.insertText(savedSelection.index, newText, formats, 'user');
+
+		// Clear saved state
+		savedSelection = null;
+		savedOriginalText = '';
+
+		// Note: Using 'user' as source will trigger text-change event
+		// Changes will be synced to other collaborators via existing WebSocket mechanism
+	}
+
 	// 還原版本後重新載入文件
 	async function handleVersionRestore() {
 		try {
@@ -562,6 +614,24 @@
 					{/if}
 				{/each}
 			</div>
+			<!-- AI 按鈕 -->
+			<button
+				type="button"
+				class="ai-button"
+				onclick={openAIDialog}
+				title="AI Writing Assistant"
+				aria-label="AI Writing Assistant"
+				disabled={!canWrite}
+			>
+				<svg class="ai-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+					/>
+				</svg>
+			</button>
 			<!-- 版本歷史按鈕 -->
 			<button
 				type="button"
@@ -694,6 +764,13 @@
 	documentId={documentId}
 	bind:isOpen={showVersionHistory}
 	onRestore={handleVersionRestore}
+/>
+
+<!-- AI 對話框 -->
+<AIDialog
+	bind:isOpen={showAIDialog}
+	selectedText={selectedTextForAI}
+	onApply={applyAIResult}
 />
 
 <style>
@@ -1069,6 +1146,36 @@
 	}
 
 	.history-icon {
+		width: 1.25rem;
+		height: 1.25rem;
+	}
+
+	/* AI button */
+	.ai-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.5rem;
+		background-color: transparent;
+		border: 1px solid #e9d5ff; /* purple-200 */
+		border-radius: 0.375rem;
+		color: #9333ea; /* purple-600 */
+		cursor: pointer;
+		transition: all 0.15s ease;
+	}
+
+	.ai-button:hover:not(:disabled) {
+		background-color: #faf5ff; /* purple-50 */
+		color: #7c3aed; /* purple-700 */
+		border-color: #c4b5fd; /* purple-300 */
+	}
+
+	.ai-button:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.ai-icon {
 		width: 1.25rem;
 		height: 1.25rem;
 	}

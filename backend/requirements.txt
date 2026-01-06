@@ -22,6 +22,9 @@ channels-redis<=4.3
 # 數據庫適配器
 psycopg2-binary==2.9.10
 
+# AI 整合
+google-genai>=1.0.0
+
 # 安全和生產環境依賴（可選）
 # gunicorn==21.2.0  # WSGI 服務器
 # whitenoise==6.6.0  # 靜態文件服務

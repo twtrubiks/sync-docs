@@ -96,10 +96,11 @@ export function get(url: string) {
 	return apiFetch(url, { method: 'GET' });
 }
 
-export function post(url: string, data: Record<string, unknown>) {
+export function post(url: string, data: Record<string, unknown>, signal?: AbortSignal) {
 	return apiFetch(url, {
 		method: 'POST',
-		body: JSON.stringify(data)
+		body: JSON.stringify(data),
+		signal
 	});
 }
 

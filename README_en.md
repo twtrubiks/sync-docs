@@ -20,12 +20,21 @@ This project was completed with assistance from [Cline](https://github.com/twtru
 
 ![alt tag](https://cdn.imgpile.com/f/qVOuhaq_xl.png)
 
+*Presence Indicators and Cursor Position Display*
+
+![alt tag](https://cdn.imgpile.com/f/K4fNF6Z_xl.png)
+
+*Text Summarization and Polishing*
+
+![alt tag](https://cdn.imgpile.com/f/GNLbY3N_xl.png)
+
 ## ✨ Key Features
 
   * **Real-time Collaboration**: Multiple users can edit the same document simultaneously, with changes reflected instantly for all participants, powered by Django Channels.
   * **Cursor Position Display**: Real-time display of collaborators' cursor positions and selections, using the quill-cursors package.
   * **Presence Indicators**: Show which users are currently viewing or editing the document, including usernames and colors.
   * **Rich Text Editing**: A clean and intuitive editor based on [Core Architecture of the Quill.js Delta Format](Delta_en.md), supporting various formatting options.
+  * **AI Writing Assistant**: Integrated with Google Gemini API, providing text summarization and polishing features to enhance writing efficiency.
   * **Version History**: Automatically saves document versions, allowing users to view history and restore to previous versions.
   * **User Authentication**: Secure user registration and login system.
   * **Document Management**: Users can create, view, and manage their documents from a personal dashboard.
@@ -45,6 +54,7 @@ This project was completed with assistance from [Cline](https://github.com/twtru
       * `django-ninja`
       * `channels`
       * `channels-redis`
+      * `google-genai` (AI features)
 
 ### Frontend
 

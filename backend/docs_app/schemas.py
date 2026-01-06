@@ -5,7 +5,7 @@ Schema 模組
 
 import uuid
 from datetime import datetime
-from typing import Optional, Union, Dict, Any, List
+from typing import Optional, Union, Dict, Any, List, Literal
 from ninja import Schema
 from pydantic import field_validator, model_validator
 
@@ -216,3 +216,19 @@ class RestoreVersionResponseSchema(Schema):
     success: bool
     message: str
     new_version_number: int
+
+
+# ============ AI 相關 Schema ============
+
+class AIProcessRequest(Schema):
+    """AI 處理請求"""
+    action: Literal["summarize", "polish"]
+    text: str  # 最大長度在 ai_service.py 中處理（5000 字元）
+
+
+class AIProcessResponse(Schema):
+    """AI 處理回應"""
+    success: bool
+    result: str
+    action: str
+    error: Optional[str] = None

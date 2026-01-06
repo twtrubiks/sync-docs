@@ -20,12 +20,21 @@ SyncDocs 是一款受 Google Docs 啟發、基於現代技術堆疊打造的網�
 
 ![alt tag](https://cdn.imgpile.com/f/qVOuhaq_xl.png)
 
+可查看在線狀態以及游標位置顯示
+
+![alt tag](https://cdn.imgpile.com/f/K4fNF6Z_xl.png)
+
+文字摘要和潤稿
+
+![alt tag](https://cdn.imgpile.com/f/GNLbY3N_xl.png)
+
 ## ✨ 主要功能
 
 * **即時協作**：多位使用者可同時編輯同一份文件，變更會即時反映給所有參與者，由 Django Channels 提供支援。
 * **游標位置顯示**：即時顯示協作者的游標位置和選取範圍，使用 quill-cursors 套件實現。
 * **在線狀態指示**：顯示目前正在查看或編輯文件的使用者，包含用戶名稱和代表色。
 * **豐富文本編輯**：基於 [Quill.js Delta 的核心技術結構](Delta.md) 的簡潔直觀編輯器，支援多種格式選項。
+* **AI 寫作助手**：整合 Google Gemini API，提供文字摘要和潤稿功能，幫助使用者提升寫作效率。
 * **版本歷史**：自動保存文件版本，可查看歷史紀錄並還原至先前版本。
 * **使用者驗證**：安全的用戶註冊和登入系統。
 * **文件管理**：使用者可以從個人儀表板建立、查看和管理自己的文件。
@@ -45,6 +54,7 @@ SyncDocs 是一款受 Google Docs 啟發、基於現代技術堆疊打造的網�
   * `django-ninja`
   * `channels`
   * `channels-redis`
+  * `google-genai`（AI 功能）
 
 ### 前端
 
