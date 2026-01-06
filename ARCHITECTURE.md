@@ -318,153 +318,53 @@ SyncDocs 是一個**教學型**的即時協作文件編輯器，展示了現代�
 ```
 backend/
 ├── backend/                    # 專案配置
-│   ├── settings.py            # Django 配置
-│   │   ├─ 資料庫配置
-│   │   ├─ 中間件配置
-│   │   ├─ CORS 設定
-│   │   ├─ JWT 配置
-│   │   └─ Channel Layer 配置
+│   ├── settings.py            # Django 設定（DB, CORS, JWT, Channel Layer）
 │   ├── urls.py                # URL 路由
 │   ├── asgi.py                # ASGI 入口（WebSocket）
 │   └── wsgi.py                # WSGI 入口（HTTP）
 │
 └── docs_app/                   # 核心應用
-    ├── models.py              # 📦 資料模型層
-    │   ├── Document           # 文件模型
-    │   │   ├─ 欄位定義
-    │   │   ├─ 關聯關係
-    │   │   └─ 業務方法
-    │   └── DocumentVersion    # 版本歷史模型
-    │       ├─ 完整內容快照
-    │       ├─ 版本號管理
-    │       └─ 清理舊版本
-    │
-    ├── api.py                 # 🌐 API 控制器層
-    │   └── DocumentController
-    │       ├─ CRUD 端點
-    │       ├─ 權限檢查
-    │       ├─ 協作者管理
-    │       └─ 版本歷史 API
-    │
-    ├── auth_api.py            # 🔐 認證控制器
-    │   └── AuthController
-    │       ├─ 註冊
-    │       ├─ 登入
-    │       └─ Token 管理
-    │
-    ├── ai_api.py              # 🤖 AI 控制器
-    │   └── AIController
-    │       └─ 文字處理（摘要/潤稿）
-    │
-    ├── comment_api.py         # 💬 評論控制器
-    │   └── CommentController
-    │       ├─ 評論 CRUD
-    │       ├─ 回覆功能
-    │       └─ WebSocket 廣播
-    │
-    ├── ai_service.py          # 🧠 AI 服務層
-    │   └── AIService
-    │       ├─ Gemini API 整合
-    │       ├─ Prompt 模板
-    │       └─ 延遲初始化
-    │
-    ├── ai_rate_limiter.py     # ⏱️ AI 速率限制
-    │   └── AIRateLimiter
-    │       └─ Redis 滑動窗口
-    │
-    ├── consumers.py           # 📡 WebSocket 消費者
-    │   └── DocConsumer
-    │       ├─ 連接管理
-    │       ├─ 權限驗證
-    │       ├─ 訊息處理
-    │       └─ 廣播邏輯
-    │
-    ├── routing.py             # 🛣️ WebSocket 路由
-    ├── auth_middleware.py     # 🔒 WebSocket 認證中間件
-    ├── connection_manager.py  # 🔗 WebSocket 連接數量管理
-    ├── rate_limiter.py        # ⏱️ 消息速率限制
-    │
-    └── tests/                 # 🧪 測試
-        ├── conftest.py        # 測試配置
-        ├── test_models.py     # 模型測試
-        ├── test_api.py        # API 測試
-        ├── test_auth.py       # 認證測試
-        ├── test_ai_api.py     # AI API 測試
-        ├── test_consumers.py  # WebSocket 測試
-        ├── test_auth_middleware.py  # 認證中間件測試
-        └── test_routing.py    # WebSocket 路由測試
+    ├── models.py              # 資料模型（Document, Collaborator, Version, Comment）
+    ├── api.py                 # 文件 CRUD API
+    ├── auth_api.py            # 認證 API（註冊、登入、Token）
+    ├── ai_api.py              # AI API（摘要、潤稿）
+    ├── comment_api.py         # 評論 API
+    ├── ai_service.py          # AI 服務層（Gemini 整合）
+    ├── ai_rate_limiter.py     # AI 速率限制
+    ├── consumers.py           # WebSocket 消費者
+    ├── schemas.py             # Pydantic Schema
+    ├── routing.py             # WebSocket 路由
+    ├── auth_middleware.py     # WebSocket 認證中間件
+    ├── connection_manager.py  # WebSocket 連接管理
+    ├── rate_limiter.py        # 消息速率限制
+    └── tests/                 # 測試（pytest）
 ```
 
 ### 前端模組架構
 
 ```
-frontend/
-└── src/
-    ├── routes/                      # 📄 頁面路由
-    │   ├── +layout.svelte          # 全局佈局
-    │   ├── +page.svelte            # 首頁
-    │   ├── login/                  # 登入頁
-    │   ├── register/               # 註冊頁
-    │   └── (protected)/            # 需認證的路由群組
-    │       ├── dashboard/          # 文件列表
-    │       │   └── +page.svelte
-    │       │       ├─ 文件列表展示
-    │       │       ├─ 創建新文件
-    │       │       └─ API 調用
-    │       │
-    │       └── docs/
-    │           └── [document_id]/  # 文件編輯頁
-    │               └── +page.svelte    # Svelte 5 Runes 語法
-    │                   ├─ Quill 編輯器整合
-    │                   ├─ WebSocket 即時連接
-    │                   ├─ `$state()` 狀態管理
-    │                   ├─ `$derived.by()` 計算狀態
-    │                   ├─ `$effect()` 自動保存邏輯
-    │                   └─ 協作者管理 UI
-    │
-    └── lib/                         # 🔧 共享模組
-        ├── auth.ts                  # 認證工具
-        │   ├─ API 封裝（get, post, put, del）
-        │   ├─ Token 管理
-        │   └─ 錯誤處理
-        │
-        ├── ai.ts                    # 🤖 AI API 模組
-        │   ├─ processWithAI()
-        │   └─ 超時處理
-        │
-        ├── api/                     # 🔌 API 模組
-        │   ├── versions.ts          # 版本歷史 API
-        │   │   ├─ getVersions()
-        │   │   ├─ getVersionDetail()
-        │   │   └─ restoreVersion()
-        │   │
-        │   └── comments.ts          # 評論 API
-        │       ├─ getComments()
-        │       ├─ createComment()
-        │       ├─ updateComment()
-        │       └─ deleteComment()
-        │
-        └── components/              # 🎨 可複用組件
-            ├── QuillEditor.svelte   # Quill 編輯器組件（Svelte 5 Runes）
-            │   ├─ `$props()` + `$bindable()` 雙向綁定
-            │   ├─ `$effect()` 監聽內容變化
-            │   ├─ callback props 事件處理
-            │   └─ 編輯器初始化與樣式
-            │
-            ├── AIDialog.svelte      # AI 寫作助手對話框
-            │   ├─ 摘要/潤稿功能
-            │   ├─ Loading 狀態
-            │   └─ 結果預覽與套用
-            │
-            ├── VersionHistoryPanel.svelte  # 版本歷史面板
-            │   ├─ 版本列表顯示
-            │   ├─ 版本選擇與預覽
-            │   └─ 還原版本功能
-            │
-            └── CommentPanel.svelte     # 評論面板組件
-                ├─ 評論列表顯示
-                ├─ 新增/編輯/刪除評論
-                └─ WebSocket 即時同步
+frontend/src/
+├── routes/                     # 頁面路由
+│   ├── +layout.svelte         # 全局佈局
+│   ├── +page.svelte           # 首頁
+│   ├── login/                 # 登入頁
+│   ├── register/              # 註冊頁
+│   └── (protected)/           # 需認證的路由群組
+│       ├── dashboard/         # 文件列表頁
+│       └── docs/[document_id]/ # 文件編輯頁（Quill + WebSocket）
+│
+└── lib/                        # 共享模組
+    ├── auth.ts                # 認證工具（API 封裝、Token 管理）
+    ├── ai.ts                  # AI API 模組
+    ├── api/                   # API 模組
+    │   ├── versions.ts        # 版本歷史 API
+    │   └── comments.ts        # 評論 API
+    ├── components/            # 可複用組件
+    │   ├── QuillEditor.svelte # Quill 編輯器
+    │   ├── AIDialog.svelte    # AI 寫作助手對話框
+    │   ├── VersionHistoryPanel.svelte  # 版本歷史面板
+    │   └── CommentPanel.svelte # 評論面板
+    └── types/                 # TypeScript 類型定義
 ```
 
 ### 數據模型設計
@@ -559,6 +459,21 @@ class Document(models.Model):
 │ created_at                  │
 └─────────────────────────────┘
     (版本歷史，完整內容快照)
+
+         │
+         ▼
+┌─────────────────────────────┐
+│         Comment             │
+├─────────────────────────────┤
+│ id (PK, UUID)               │
+│ document_id (FK) ───────────┤
+│ author_id (FK)              │
+│ content (TextField)         │
+│ parent_id (FK, nullable)────┤ (self-reference for replies)
+│ created_at                  │
+│ updated_at                  │
+└─────────────────────────────┘
+    (評論系統，支援回覆)
 ```
 
 #### DocumentVersion 模型
@@ -602,6 +517,40 @@ class DocumentVersion(models.Model):
         ]
 ```
 
+#### Comment 模型
+
+```python
+class Comment(models.Model):
+    # ─────────── 主鍵 ───────────
+    id = UUIDField(primary_key=True, default=uuid4)
+
+    # ─────────── 關聯文件 ───────────
+    document = ForeignKey(Document, on_delete=CASCADE, related_name='comments')
+    # 設計理由：
+    # ✓ CASCADE：文件刪除時，評論也刪除
+    # ✓ related_name：可用 document.comments 查詢評論列表
+
+    # ─────────── 評論作者 ───────────
+    author = ForeignKey(User, on_delete=CASCADE, related_name='comments')
+
+    # ─────────── 評論內容 ───────────
+    content = TextField()
+
+    # ─────────── 回覆功能 ───────────
+    parent = ForeignKey('self', on_delete=CASCADE, null=True, blank=True, related_name='replies')
+    # 設計理由：
+    # ✓ 自引用：支援評論回覆（討論串）
+    # ✓ CASCADE：父評論刪除時，回覆也刪除
+
+    # ─────────── 元數據 ───────────
+    class Meta:
+        ordering = ['created_at']
+        indexes = [
+            Index(fields=['document', 'created_at']),
+            Index(fields=['parent']),
+        ]
+```
+
 ---
 
 ## 🎨 設計模式
@@ -614,7 +563,7 @@ class DocumentVersion(models.Model):
 class DocumentController:
     def _get_user_accessible_documents_query(self, user):
         """統一的查詢邏輯"""
-        return Q(owner=user) | Q(shared_with=user)
+        return Q(owner=user) | Q(collaborators__user=user)
 
     def _get_document_with_permission_check(self, document_id, user, owner_only=False):
         """統一的權限檢查邏輯"""

@@ -6,7 +6,9 @@ SyncDocs 是一款受 Google Docs 啟發、基於現代技術堆疊打造的網�
 
 該專案利用 Django Ninja 建構高效能的後端 API，並使用 SvelteKit 提供反應式且快速的前端使用者介面。
 
-本專案使用 [Cline](https://github.com/twtrubiks/mcp-vscode-cline?tab=readme-ov-file#cline) 完成, 可參考 [.clinerules/MVP_Development.md](.clinerules/MVP_Development.md)
+~~本專案使用 [Cline](https://github.com/twtrubiks/mcp-vscode-cline?tab=readme-ov-file#cline) 完成, 可參考 [.clinerules/MVP_Development.md](.clinerules/MVP_Development.md)~~
+
+後續開發使用 Claude Code 實作
 
 ## 畫面截圖
 

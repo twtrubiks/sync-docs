@@ -6,7 +6,9 @@ SyncDocs is a web-based collaborative document editor inspired by Google Docs, b
 
 This project leverages Django Ninja for a high-performance backend API and SvelteKit for a reactive and fast frontend user interface.
 
-This project was completed with assistance from [Cline](https://github.com/twtrubiks/mcp-vscode-cline?tab=readme-ov-file#cline). For reference, see [.clinerules/MVP_Development.md](.clinerules/MVP_Development.md)
+~~This project was completed with assistance from [Cline](https://github.com/twtrubiks/mcp-vscode-cline?tab=readme-ov-file#cline). For reference, see [.clinerules/MVP_Development.md](.clinerules/MVP_Development.md)~~
+
+Subsequent development was implemented using Claude Code
 
 ## Screenshots
 

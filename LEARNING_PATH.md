@@ -178,12 +178,21 @@ Document.objects.filter(owner=user)
   - `$effect()` 監聽 isOpen 變化載入版本
   - 還原後重新載入文件的流程
 
+**3.6 評論面板**
+- 閱讀檔案：`frontend/src/lib/components/CommentPanel.svelte`
+- 閱讀檔案：`frontend/src/lib/api/comments.ts`
+- 關鍵概念：
+  - 評論列表顯示與回覆功能
+  - WebSocket 即時同步評論（comment_add、comment_update、comment_delete 事件）
+  - 權限判斷（is_author、can_delete）
+
 ### 階段檢查點
 - [ ] 理解 SvelteKit 檔案系統路由如何工作
 - [ ] 能解釋 Svelte 5 的 `$props()` 和 `$bindable()` 如何實現雙向綁定
 - [ ] 理解 `$state()`、`$derived()`、`$effect()` 的使用場景
 - [ ] 理解 Delta 的三種操作（insert, retain, delete）
 - [ ] 理解版本歷史面板如何與文件頁面整合
+- [ ] 理解評論系統的 WebSocket 即時同步機制
 
 ---
 
@@ -269,11 +278,20 @@ Document.objects.filter(owner=user)
   - API 端點測試（list、detail、restore）
   - 權限測試（只讀用戶無法還原）
 
+**5.5 評論系統測試**
+- 閱讀：`backend/docs_app/tests/test_comments.py`
+- 關鍵概念：
+  - 評論 CRUD 操作測試
+  - 回覆功能測試（parent_id）
+  - 權限測試（作者/文件擁有者可刪除）
+  - WebSocket 即時通知測試
+
 ### 階段檢查點
 - [ ] 能運行測試並看到覆蓋率報告
 - [ ] 理解 fixture 的作用
 - [ ] 能為新功能編寫測試
 - [ ] 理解版本歷史測試的覆蓋場景
+- [ ] 理解評論系統測試的權限驗證邏輯
 
 ---
 
