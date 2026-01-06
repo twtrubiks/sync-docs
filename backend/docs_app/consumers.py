@@ -712,3 +712,32 @@ class DocConsumer(AsyncWebsocketConsumer):
         except asyncio.CancelledError:
             # 正常取消，不需要記錄錯誤
             pass
+
+    # ========== 評論通知處理 ==========
+
+    async def comment_notification(self, event):
+        """
+        處理評論通知事件並發送給客戶端
+
+        Args:
+            event: 包含 action 和評論數據的事件
+        """
+        action = event.get('action')
+
+        if action == 'add':
+            await self.send(text_data=json.dumps({
+                'type': 'comment_add',
+                'comment': event.get('comment')
+            }))
+        elif action == 'update':
+            await self.send(text_data=json.dumps({
+                'type': 'comment_update',
+                'comment_id': event.get('comment_id'),
+                'content': event.get('content'),
+                'updated_at': event.get('updated_at')
+            }))
+        elif action == 'delete':
+            await self.send(text_data=json.dumps({
+                'type': 'comment_delete',
+                'comment_id': event.get('comment_id')
+            }))

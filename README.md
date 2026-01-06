@@ -10,23 +10,31 @@ SyncDocs 是一款受 Google Docs 啟發、基於現代技術堆疊打造的網�
 
 ## 畫面截圖
 
-![alt tag](https://cdn.imgpile.com/f/wqSGcM2_xl.png)
+![文件編輯器主畫面](https://cdn.imgpile.com/f/wqSGcM2_xl.png)
 
 即時更新
 
-![alt tag](https://cdn.imgpile.com/f/eoPjnL3_xl.png)
+![即時更新](https://cdn.imgpile.com/f/eoPjnL3_xl.png)
 
 可以共用文件
 
-![alt tag](https://cdn.imgpile.com/f/qVOuhaq_xl.png)
+![共用文件](https://cdn.imgpile.com/f/qVOuhaq_xl.png)
 
 可查看在線狀態以及游標位置顯示
 
-![alt tag](https://cdn.imgpile.com/f/K4fNF6Z_xl.png)
+![在線狀態與游標位置](https://cdn.imgpile.com/f/K4fNF6Z_xl.png)
 
 文字摘要和潤稿
 
-![alt tag](https://cdn.imgpile.com/f/GNLbY3N_xl.png)
+![文字摘要和潤稿](https://cdn.imgpile.com/f/GNLbY3N_xl.png)
+
+版本歷史功能
+
+![版本歷史面板](./screenshots/version-history.png)
+
+評論功能
+
+![評論面板](./screenshots/comment-panel.png)
 
 ## ✨ 主要功能
 
@@ -36,6 +44,7 @@ SyncDocs 是一款受 Google Docs 啟發、基於現代技術堆疊打造的網�
 * **豐富文本編輯**：基於 [Quill.js Delta 的核心技術結構](Delta.md) 的簡潔直觀編輯器，支援多種格式選項。
 * **AI 寫作助手**：整合 Google Gemini API，提供文字摘要和潤稿功能，幫助使用者提升寫作效率。
 * **版本歷史**：自動保存文件版本，可查看歷史紀錄並還原至先前版本。
+* **評論系統**：支援在文件上添加評論和回覆，評論即時同步給所有協作者。
 * **使用者驗證**：安全的用戶註冊和登入系統。
 * **文件管理**：使用者可以從個人儀表板建立、查看和管理自己的文件。
 * **文件共享**：輕鬆與其他使用者共享文件。

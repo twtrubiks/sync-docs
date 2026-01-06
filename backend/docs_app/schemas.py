@@ -232,3 +232,55 @@ class AIProcessResponse(Schema):
     result: str
     action: str
     error: Optional[str] = None
+
+
+# ============ 評論相關 Schema ============
+
+class CommentCreateSchema(Schema):
+    """創建評論請求"""
+    content: str
+    parent_id: Optional[uuid.UUID] = None  # 若為回覆，填入父評論 ID
+
+    @field_validator('content')
+    @classmethod
+    def validate_content(cls, v):
+        """驗證評論內容"""
+        if not v or not v.strip():
+            raise ValueError("評論內容不能為空")
+        if len(v) > 5000:
+            raise ValueError("評論內容不能超過 5000 字元")
+        return v.strip()
+
+
+class CommentUpdateSchema(Schema):
+    """編輯評論請求"""
+    content: str
+
+    @field_validator('content')
+    @classmethod
+    def validate_content(cls, v):
+        """驗證評論內容"""
+        if not v or not v.strip():
+            raise ValueError("評論內容不能為空")
+        if len(v) > 5000:
+            raise ValueError("評論內容不能超過 5000 字元")
+        return v.strip()
+
+
+class CommentSchema(Schema):
+    """評論回應"""
+    id: uuid.UUID
+    content: str
+    author_username: str
+    created_at: datetime
+    updated_at: datetime
+    parent_id: Optional[uuid.UUID] = None
+    reply_count: int = 0
+    is_author: bool = False   # 當前用戶是否為作者（可編輯）
+    can_delete: bool = False  # 當前用戶是否可刪除（作者或文件擁有者）
+
+
+class CommentListSchema(Schema):
+    """評論列表回應"""
+    comments: List[CommentSchema]
+    total: int

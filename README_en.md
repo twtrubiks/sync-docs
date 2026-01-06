@@ -10,23 +10,31 @@ This project was completed with assistance from [Cline](https://github.com/twtru
 
 ## Screenshots
 
-![alt tag](https://cdn.imgpile.com/f/wqSGcM2_xl.png)
+![Document Editor Main Screen](https://cdn.imgpile.com/f/wqSGcM2_xl.png)
 
 *Real-time Updates*
 
-![alt tag](https://cdn.imgpile.com/f/eoPjnL3_xl.png)
+![Real-time Updates](https://cdn.imgpile.com/f/eoPjnL3_xl.png)
 
 *Document Sharing*
 
-![alt tag](https://cdn.imgpile.com/f/qVOuhaq_xl.png)
+![Document Sharing](https://cdn.imgpile.com/f/qVOuhaq_xl.png)
 
 *Presence Indicators and Cursor Position Display*
 
-![alt tag](https://cdn.imgpile.com/f/K4fNF6Z_xl.png)
+![Presence Indicators and Cursor Position](https://cdn.imgpile.com/f/K4fNF6Z_xl.png)
 
 *Text Summarization and Polishing*
 
-![alt tag](https://cdn.imgpile.com/f/GNLbY3N_xl.png)
+![Text Summarization and Polishing](https://cdn.imgpile.com/f/GNLbY3N_xl.png)
+
+*Version History*
+
+![Version History Panel](./screenshots/version-history.png)
+
+*Comment System*
+
+![Comment Panel](./screenshots/comment-panel.png)
 
 ## ✨ Key Features
 
@@ -36,6 +44,7 @@ This project was completed with assistance from [Cline](https://github.com/twtru
   * **Rich Text Editing**: A clean and intuitive editor based on [Core Architecture of the Quill.js Delta Format](Delta_en.md), supporting various formatting options.
   * **AI Writing Assistant**: Integrated with Google Gemini API, providing text summarization and polishing features to enhance writing efficiency.
   * **Version History**: Automatically saves document versions, allowing users to view history and restore to previous versions.
+  * **Comment System**: Add comments and replies to documents, with real-time synchronization for all collaborators.
   * **User Authentication**: Secure user registration and login system.
   * **Document Management**: Users can create, view, and manage their documents from a personal dashboard.
   * **Document Sharing**: Easily share documents with other users for collaboration.

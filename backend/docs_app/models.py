@@ -282,3 +282,86 @@ class DocumentVersion(models.Model):
         cls.objects.filter(document=document).exclude(
             id__in=list(versions_to_keep)
         ).delete()
+
+
+class Comment(models.Model):
+    """
+    文件評論模型
+
+    支持文件層級評論和回覆（討論串）
+
+    Attributes:
+        id (UUIDField): 評論的唯一標識符
+        document (ForeignKey): 關聯的文檔
+        author (ForeignKey): 評論作者
+        content (TextField): 評論內容
+        parent (ForeignKey): 父評論（若為回覆）
+        created_at (DateTimeField): 創建時間
+        updated_at (DateTimeField): 更新時間
+    """
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        help_text="評論的唯一標識符"
+    )
+
+    document = models.ForeignKey(
+        'Document',
+        on_delete=models.CASCADE,
+        related_name='comments',
+        help_text="關聯的文檔"
+    )
+
+    author = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='comments',
+        help_text="評論作者"
+    )
+
+    content = models.TextField(
+        help_text="評論內容"
+    )
+
+    parent = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='replies',
+        help_text="父評論（若為回覆）"
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="創建時間"
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        help_text="更新時間"
+    )
+
+    class Meta:
+        verbose_name = "評論"
+        verbose_name_plural = "評論"
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['document', 'created_at']),
+            models.Index(fields=['parent']),
+        ]
+
+    def __str__(self):
+        return f"Comment by {self.author.username} on {self.document.title}"
+
+    @property
+    def author_username(self) -> str:
+        """返回作者用戶名，用於 Schema 序列化"""
+        return self.author.username
+
+    @property
+    def reply_count(self) -> int:
+        """返回回覆數量"""
+        return self.replies.count()

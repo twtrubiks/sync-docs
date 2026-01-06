@@ -335,7 +335,6 @@ Document.objects.filter(owner=user)
 
 ### 後續學習方向
 - 實作 OT (Operational Transformation) 解決衝突
-- 添加評論功能
 - 學習 Redis、Celery、Kubernetes
 
 ---

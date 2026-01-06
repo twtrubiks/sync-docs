@@ -5,6 +5,7 @@
 	import QuillEditor from '$lib/components/QuillEditor.svelte';
 	import VersionHistoryPanel from '$lib/components/VersionHistoryPanel.svelte';
 	import AIDialog from '$lib/components/AIDialog.svelte';
+	import CommentPanel from '$lib/components/CommentPanel.svelte';
 	import { get, put, del, post, logout, type Collaborator } from '$lib/auth';
 	import { toast } from '@zerodevx/svelte-toast';
 	import type { QuillDelta, QuillType } from '$lib/types/quill';
@@ -71,6 +72,10 @@
 
 	// State for version history panel
 	let showVersionHistory = $state(false);
+
+	// State for comment panel
+	let showCommentPanel = $state(false);
+	let commentPanel: CommentPanel;
 
 	// Cursor and Presence state
 	let quillEditor: QuillEditor;
@@ -331,6 +336,16 @@
 						} else {
 							toast.push(data.message || 'An error occurred.', { theme: errorTheme });
 						}
+						break;
+					// Comment events
+					case 'comment_add':
+						commentPanel?.addCommentFromWS(data.comment);
+						break;
+					case 'comment_update':
+						commentPanel?.updateCommentFromWS(data.comment_id, data.content, data.updated_at);
+						break;
+					case 'comment_delete':
+						commentPanel?.removeCommentFromWS(data.comment_id);
 						break;
 				}
 			};
@@ -614,6 +629,23 @@
 					{/if}
 				{/each}
 			</div>
+			<!-- 評論按鈕 -->
+			<button
+				type="button"
+				class="comment-button"
+				onclick={() => (showCommentPanel = true)}
+				title="評論"
+				aria-label="評論"
+			>
+				<svg class="comment-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+					/>
+				</svg>
+			</button>
 			<!-- AI 按鈕 -->
 			<button
 				type="button"
@@ -771,6 +803,16 @@
 	bind:isOpen={showAIDialog}
 	selectedText={selectedTextForAI}
 	onApply={applyAIResult}
+/>
+
+<!-- 評論面板 -->
+<CommentPanel
+	bind:this={commentPanel}
+	{documentId}
+	bind:isOpen={showCommentPanel}
+	{canWrite}
+	{currentUserId}
+	{isOwner}
 />
 
 <style>
@@ -1176,6 +1218,31 @@
 	}
 
 	.ai-icon {
+		width: 1.25rem;
+		height: 1.25rem;
+	}
+
+	/* Comment button */
+	.comment-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.5rem;
+		background-color: transparent;
+		border: 1px solid #e2e8f0;
+		border-radius: 0.375rem;
+		color: #4a5568;
+		cursor: pointer;
+		transition: all 0.15s ease;
+	}
+
+	.comment-button:hover {
+		background-color: #f7fafc;
+		color: #2d3748;
+		border-color: #cbd5e0;
+	}
+
+	.comment-icon {
 		width: 1.25rem;
 		height: 1.25rem;
 	}
