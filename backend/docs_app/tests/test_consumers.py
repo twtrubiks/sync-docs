@@ -57,7 +57,6 @@ class TestDocConsumer:
         assert consumer is not None
 
 
-@pytest.mark.asyncio
 class TestDocConsumerValidation:
     """測試 WebSocket 消息驗證功能"""
 

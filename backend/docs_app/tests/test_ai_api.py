@@ -18,7 +18,6 @@ pytestmark = pytest.mark.django_db
 class TestAIService:
     """AI Service 單元測試"""
 
-    @pytest.mark.asyncio
     async def test_process_summarize(self):
         """測試摘要功能"""
         with patch('docs_app.ai_service.genai') as mock_genai:
@@ -41,7 +40,6 @@ class TestAIService:
 
                 assert result == "這是摘要結果"
 
-    @pytest.mark.asyncio
     async def test_process_polish(self):
         """測試潤稿功能"""
         with patch('docs_app.ai_service.genai') as mock_genai:
@@ -62,7 +60,6 @@ class TestAIService:
 
                 assert result == "潤飾後的文字"
 
-    @pytest.mark.asyncio
     async def test_empty_text_error(self):
         """測試空文字錯誤"""
         with patch('docs_app.ai_service.settings') as mock_settings:
@@ -74,7 +71,6 @@ class TestAIService:
             with pytest.raises(ValueError, match="Text cannot be empty"):
                 await service.process('summarize', '')
 
-    @pytest.mark.asyncio
     async def test_invalid_action_error(self):
         """測試無效操作錯誤"""
         with patch('docs_app.ai_service.settings') as mock_settings:
@@ -86,7 +82,6 @@ class TestAIService:
             with pytest.raises(ValueError, match="Unknown action"):
                 await service.process('invalid', '文字')
 
-    @pytest.mark.asyncio
     async def test_api_not_configured_error(self):
         """測試 API Key 未配置錯誤"""
         with patch('docs_app.ai_service.settings') as mock_settings:
@@ -99,7 +94,6 @@ class TestAIService:
             with pytest.raises(RuntimeError, match="AI 服務未配置"):
                 await service.process('summarize', '文字')
 
-    @pytest.mark.asyncio
     async def test_text_truncation(self):
         """測試文字長度限制（超過 5000 字元會被截斷）"""
         with patch('docs_app.ai_service.genai') as mock_genai:

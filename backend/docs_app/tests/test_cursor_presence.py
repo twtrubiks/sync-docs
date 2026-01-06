@@ -11,7 +11,6 @@ from channels.testing import WebsocketCommunicator
 
 
 @pytest.mark.django_db(transaction=True)
-@pytest.mark.asyncio
 class TestCursorPresence:
     """游標與在線狀態測試"""
 

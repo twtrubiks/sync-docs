@@ -1,6 +1,6 @@
 import json
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from docs_app.models import Document
 
 # 使用 pytest-django 的 db fixture 來確保資料庫在測試之間是乾淨的
@@ -237,6 +237,8 @@ def test_update_document_broadcasts_doc_saved(authenticated_client):
 
     with patch('docs_app.api.get_channel_layer') as mock_get_channel_layer:
         mock_channel_layer = MagicMock()
+        # 使用 AsyncMock 正確模擬 async 方法，避免 async_to_sync 警告
+        mock_channel_layer.group_send = AsyncMock()
         mock_get_channel_layer.return_value = mock_channel_layer
 
         # 更新文檔

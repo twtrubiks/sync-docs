@@ -156,7 +156,6 @@ def test_extract_token_from_subprotocol_with_dots():
     assert token == jwt_token
 
 
-@pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
 async def test_middleware_with_subprotocol_authentication(test_user, valid_jwt_token):
     """測試中間件通過 subprotocol 認證用戶"""
@@ -178,7 +177,6 @@ async def test_middleware_with_subprotocol_authentication(test_user, valid_jwt_t
     assert received_scope['accepted_subprotocol'] == f'access_token.{valid_jwt_token}'
 
 
-@pytest.mark.asyncio
 async def test_middleware_with_no_subprotocol():
     """測試中間件在沒有 subprotocol 時返回匿名用戶"""
     scope = {
@@ -198,7 +196,6 @@ async def test_middleware_with_no_subprotocol():
     assert received_scope['accepted_subprotocol'] is None
 
 
-@pytest.mark.asyncio
 async def test_middleware_with_invalid_token_in_subprotocol():
     """測試中間件處理無效 token"""
     scope = {
@@ -217,7 +214,6 @@ async def test_middleware_with_invalid_token_in_subprotocol():
     assert isinstance(received_scope['user'], AnonymousUser)
 
 
-@pytest.mark.asyncio
 async def test_middleware_with_expired_token_in_subprotocol(expired_jwt_token):
     """測試中間件處理過期 token"""
     scope = {

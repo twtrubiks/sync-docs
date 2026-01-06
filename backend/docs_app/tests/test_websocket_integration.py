@@ -13,10 +13,7 @@ import asyncio
 import pytest
 from channels.testing import WebsocketCommunicator
 
-pytestmark = [
-    pytest.mark.django_db(transaction=True),
-    pytest.mark.asyncio
-]
+pytestmark = pytest.mark.django_db(transaction=True)
 
 
 async def consume_connection_success(communicator, timeout=2):

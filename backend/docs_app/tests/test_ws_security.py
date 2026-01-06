@@ -12,10 +12,7 @@ from docs_app.consumers import WSCloseCodes
 from docs_app.connection_manager import ConnectionManager
 from docs_app.rate_limiter import RateLimiter
 
-pytestmark = [
-    pytest.mark.django_db(transaction=True),
-    pytest.mark.asyncio
-]
+pytestmark = pytest.mark.django_db(transaction=True)
 
 
 class TestAuthErrorResponse:
