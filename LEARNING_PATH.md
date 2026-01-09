@@ -93,7 +93,7 @@ Document.objects.filter(owner=user)
 ```
 
 ### 階段檢查點
-- [ ] 能解釋為什麼 `owner` 和 `shared_with` 需要不同的 `related_name`
+- [ ] 能解釋為什麼 `owner` 和 `collaborators` 需要不同的 `related_name`
 - [ ] 能使用 Django ORM 查詢用戶擁有或被分享的所有文件
 - [ ] 理解 `select_related` 和 `prefetch_related` 的差異
 
@@ -107,8 +107,16 @@ Document.objects.filter(owner=user)
 ### 學習內容
 
 **2.1 認證系統**
-- 閱讀檔案：`backend/docs_app/auth_api.py`
+- 閱讀檔案：`backend/docs_app/auth_api.py`、`backend/backend/urls.py`
 - 關鍵概念：JWT Token 結構、Access Token vs Refresh Token
+- API 端點來源：
+  | 功能 | 端點 | 來源 |
+  |------|------|------|
+  | 登入 | `/api/token/pair` | NinjaJWTDefaultController |
+  | 刷新 | `/api/token/refresh` | NinjaJWTDefaultController |
+  | 註冊 | `/api/auth/register` | AuthController (auth_api.py) |
+  | 登出 | `/api/auth/logout` | AuthController (auth_api.py) |
+  | 當前用戶 | `/api/auth/me` | AuthController (auth_api.py) |
 - 延伸閱讀：[JWT 介紹](https://jwt.io/introduction)、[Django Ninja JWT](https://eadwincode.github.io/django-ninja-jwt/)
 
 **2.2 Django Ninja Schema**
@@ -219,8 +227,11 @@ Document.objects.filter(owner=user)
 **4.3 WebSocket 認證**
 - 閱讀檔案：`backend/docs_app/auth_middleware.py`
 - 關鍵概念：
-  - 為什麼用 Query Parameter 而非 Header（瀏覽器 WebSocket API 限制）
-  - Middleware 模式
+  - 為什麼用 Subprotocol 傳遞 Token
+    - 瀏覽器 WebSocket API 不支持自定義 Header
+    - Subprotocol 比 Query Parameter 更安全（Token 不會出現在 URL 和伺服器日誌中）
+  - 前端連接方式：`new WebSocket(url, ['access_token.<JWT>'])`
+  - Middleware 模式：`JWTAuthMiddleware` 解析 subprotocol 並驗證 token
 
 **4.4 Delta 同步邏輯**
 - 閱讀：`backend/docs_app/consumers.py` 的 `receive` 和 `doc_update` 方法
@@ -234,7 +245,7 @@ Document.objects.filter(owner=user)
 - 理解 HTTP API 和 WebSocket 的配合
 
 **4.6 游標與在線狀態（Cursor Presence）**
-- 閱讀檔案：`backend/docs_app/consumers.py` 的 `handle_cursor_move`、`add_presence`、`remove_presence` 方法
+- 閱讀檔案：`backend/docs_app/consumers.py` 的 `handle_cursor_move`、`add_user_to_presence`、`remove_user_from_presence` 方法
 - 閱讀檔案：`frontend/src/lib/components/QuillEditor.svelte` 的 `setCursor`、`removeCursor` 方法
 - 關鍵概念：
   - WebSocket 消息類型：`cursor_move`、`user_join`、`user_leave`、`presence_sync`

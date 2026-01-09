@@ -26,7 +26,7 @@
     * `content` (JSONField 或 TextField)
     * `created_at` (DateTimeField auto_now_add)
     * `updated_at` (DateTimeField auto_now)
-    * `shared_with` 欄位 (`models.ManyToManyField(User, related_name='shared_documents')`)，用來記錄可以協作的使用者。
+    * `collaborators` 欄位（透過 `DocumentCollaborator` 中間模型，支援 read/write 權限級別），用來記錄可以協作的使用者。
 * **Pydantic Schemas (用於 Django Ninja)**
   * `DocumentSchema`, `DocumentCreateSchema`, `DocumentUpdateSchema`
   * `ShareRequestSchema` (用來接收要分享的使用者 username) 和 `UserSchema` (用於在分享列表中顯示使用者)。
@@ -92,7 +92,7 @@
 
 * **WebSocket Consumer (Django Channels)**
   * `DocConsumer` 用於處理特定文件的 WebSocket 連接。
-  * `connect()`: 更新身份驗證邏輯，允許 `owner` 或在 `shared_with` 列表中的使用者建立 WebSocket 連線並加入協作 Channel Group。
+  * `connect()`: 更新身份驗證邏輯，允許 `owner` 或在 `collaborators` 列表中的使用者建立 WebSocket 連線並加入協作 Channel Group。
   * `disconnect()`: 從 Channel Group 移除。
   * `receive_json()`: 接收來自客戶端的編輯操作 (Quill Delta)並廣播。
 * **SvelteKit 端 WebSocket 整合 (Svelte 5 Runes)**
