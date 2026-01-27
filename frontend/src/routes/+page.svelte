@@ -21,5 +21,10 @@
 </script>
 
 <div class="flex h-screen items-center justify-center">
-	<p>Loading...</p>
+	<div class="flex items-center gap-3 text-primary-600">
+		<div
+			class="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600"
+		></div>
+		<p class="text-lg">Loading...</p>
+	</div>
 </div>

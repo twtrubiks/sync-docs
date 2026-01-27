@@ -7,6 +7,7 @@
 		type DocumentVersion
 	} from '$lib/api/versions';
 	import { toast } from '@zerodevx/svelte-toast';
+	import { X, RotateCcw, Clock, User } from 'lucide-svelte';
 
 	interface Props {
 		documentId: string;
@@ -102,56 +103,65 @@
 	<!-- 背景遮罩 -->
 	<button
 		type="button"
-		class="fixed inset-0 z-40 bg-black/50"
+		class="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
 		onclick={closePanel}
 		onkeydown={(e) => e.key === 'Escape' && closePanel()}
 		aria-label="關閉版本歷史"
 	></button>
 
 	<!-- 側邊面板 -->
-	<div class="fixed top-0 right-0 z-50 flex h-full w-96 flex-col bg-white shadow-xl">
+	<div
+		class="fixed top-0 right-0 z-50 flex h-full w-full flex-col border-l border-primary-200 bg-white shadow-2xl sm:w-96"
+	>
 		<!-- 標題 -->
-		<div class="flex items-center justify-between border-b p-4">
-			<h2 class="text-lg font-semibold">版本歷史</h2>
+		<div class="flex items-center justify-between border-b border-primary-200 p-4">
+			<div class="flex items-center gap-2">
+				<Clock size={20} class="text-primary-500" />
+				<h2 class="text-lg font-semibold text-primary-900">版本歷史</h2>
+			</div>
 			<button
 				type="button"
-				class="text-gray-500 hover:text-gray-700"
+				class="cursor-pointer rounded-lg p-1.5 text-primary-400 transition-colors hover:bg-primary-100 hover:text-primary-600"
 				onclick={closePanel}
 				aria-label="關閉"
 			>
-				<svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M6 18L18 6M6 6l12 12"
-					/>
-				</svg>
+				<X size={20} />
 			</button>
 		</div>
 
 		<!-- 版本列表 -->
 		<div class="flex-1 overflow-y-auto">
 			{#if loading}
-				<div class="p-4 text-center text-gray-500">載入中...</div>
+				<div class="flex items-center justify-center py-12">
+					<div
+						class="h-6 w-6 animate-spin rounded-full border-2 border-primary-200 border-t-primary-600"
+					></div>
+					<span class="ml-2 text-primary-500">載入中...</span>
+				</div>
 			{:else if versions.length === 0}
-				<div class="p-4 text-center text-gray-500">尚無版本記錄</div>
+				<div class="py-12 text-center">
+					<Clock size={40} class="mx-auto mb-3 text-primary-300" />
+					<p class="text-primary-500">尚無版本記錄</p>
+				</div>
 			{:else}
-				<div class="divide-y">
+				<div class="divide-y divide-primary-100">
 					{#each versions as version (version.id)}
 						<button
 							type="button"
-							class="w-full p-4 text-left transition-colors hover:bg-gray-50
-								   {selectedVersion?.id === version.id ? 'bg-blue-50' : ''}"
+							class="w-full cursor-pointer p-4 text-left transition-colors hover:bg-primary-50
+								   {selectedVersion?.id === version.id
+								? 'border-l-2 border-primary-500 bg-primary-50'
+								: 'border-l-2 border-transparent'}"
 							onclick={() => previewVersion(version)}
 						>
 							<div class="flex items-center justify-between">
-								<span class="font-medium">版本 {version.version_number}</span>
-								<span class="text-sm text-gray-500">{formatTime(version.created_at)}</span>
+								<span class="font-medium text-primary-800">版本 {version.version_number}</span>
+								<span class="text-sm text-primary-500">{formatTime(version.created_at)}</span>
 							</div>
 							{#if version.created_by_username}
-								<div class="mt-1 text-sm text-gray-500">
-									由 {version.created_by_username} 編輯
+								<div class="mt-1.5 flex items-center gap-1 text-sm text-primary-500">
+									<User size={14} />
+									<span>{version.created_by_username}</span>
 								</div>
 							{/if}
 						</button>
@@ -162,18 +172,22 @@
 
 		<!-- 還原按鈕 -->
 		{#if selectedVersion}
-			<div class="border-t p-4">
+			<div class="border-t border-primary-200 p-4">
 				<button
 					type="button"
-					class="w-full rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors
-							 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+					class="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 font-medium text-white transition-colors
+							 hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
 					onclick={handleRestore}
 					disabled={restoring}
 				>
 					{#if restoring}
-						還原中...
+						<span
+							class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
+						></span>
+						<span>還原中...</span>
 					{:else}
-						還原到版本 {selectedVersion.version_number}
+						<RotateCcw size={18} />
+						<span>還原到版本 {selectedVersion.version_number}</span>
 					{/if}
 				</button>
 			</div>

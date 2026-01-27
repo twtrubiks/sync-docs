@@ -1,3 +1,70 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/forms';
 @plugin '@tailwindcss/typography';
+
+/* Plus Jakarta Sans Font - loaded via app.html for better performance */
+
+/* Brand Color System - Teal + Orange */
+@theme {
+	/* Primary Colors (Teal) */
+	--color-primary-50: #f0fdfa;
+	--color-primary-100: #ccfbf1;
+	--color-primary-200: #99f6e4;
+	--color-primary-300: #5eead4;
+	--color-primary-400: #2dd4bf;
+	--color-primary-500: #14b8a6;
+	--color-primary-600: #0d9488;
+	--color-primary-700: #0f766e;
+	--color-primary-800: #115e59;
+	--color-primary-900: #134e4a;
+
+	/* CTA Colors (Orange) */
+	--color-cta-50: #fff7ed;
+	--color-cta-100: #ffedd5;
+	--color-cta-200: #fed7aa;
+	--color-cta-300: #fdba74;
+	--color-cta-400: #fb923c;
+	--color-cta-500: #f97316;
+	--color-cta-600: #ea580c;
+	--color-cta-700: #c2410c;
+	--color-cta-800: #9a3412;
+	--color-cta-900: #7c2d12;
+
+	/* Semantic Colors */
+	--color-success: #10b981;
+	--color-danger: #ef4444;
+	--color-warning: #f59e0b;
+
+	/* Typography */
+	--font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+}
+
+/* Base Styles */
+html {
+	font-family: var(--font-sans);
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+body {
+	background-color: var(--color-primary-50);
+	color: var(--color-primary-900);
+	overflow-x: hidden;
+}
+
+/* Focus Styles for Accessibility */
+*:focus-visible {
+	outline: 2px solid var(--color-primary-500);
+	outline-offset: 2px;
+}
+
+/* Reduced Motion Support */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
+}

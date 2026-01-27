@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { processWithAI } from '$lib/ai';
 	import { toast } from '@zerodevx/svelte-toast';
+	import { X, Sparkles, FileText, Wand2, Check } from 'lucide-svelte';
 
 	let {
 		isOpen = $bindable(false),
@@ -67,82 +68,81 @@
 		summarize: '摘要結果',
 		polish: '潤稿結果'
 	};
+
+	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape' && isOpen) {
+			close();
+		}
+	}
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 {#if isOpen}
 	<!-- Background overlay -->
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="fixed inset-0 bg-black/50 z-50" onclick={close}></div>
+	<button
+		type="button"
+		class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+		onclick={close}
+		aria-label="關閉對話框"
+	></button>
 
 	<!-- Dialog -->
 	<div
-		class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
-              w-[600px] max-w-[90vw] max-h-[80vh] bg-white rounded-lg shadow-xl z-50
-              flex flex-col"
+		class="fixed top-1/2 left-1/2 z-50 flex max-h-[80vh] w-[600px] max-w-[90vw]
+              -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-cta-200 bg-white shadow-2xl"
 	>
 		<!-- Header -->
-		<div class="p-4 border-b flex items-center justify-between">
-			<h2 class="text-lg font-semibold flex items-center gap-2">
-				<svg
-					class="w-5 h-5 text-purple-600"
-					fill="none"
-					stroke="currentColor"
-					viewBox="0 0 24 24"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-					/>
-				</svg>
+		<div class="flex items-center justify-between border-b border-cta-100 p-4">
+			<h2 class="flex items-center gap-2 text-lg font-semibold text-primary-900">
+				<Sparkles size={20} class="text-cta-500" />
 				AI 寫作助手
 			</h2>
-			<button class="text-gray-500 hover:text-gray-700" onclick={close} aria-label="Close dialog">
-				<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M6 18L18 6M6 6l12 12"
-					/>
-				</svg>
+			<button
+				class="cursor-pointer rounded-lg p-1.5 text-primary-400 transition-colors hover:bg-primary-100 hover:text-primary-600"
+				onclick={close}
+				aria-label="Close dialog"
+			>
+				<X size={20} />
 			</button>
 		</div>
 
 		<!-- Content area -->
-		<div class="flex-1 overflow-y-auto p-4 space-y-4">
+		<div class="flex-1 space-y-4 overflow-y-auto p-5">
 			<!-- Selected text -->
 			<div>
-				<span class="block text-sm font-medium text-gray-700 mb-1">選取的文字</span>
-				<div class="p-3 bg-gray-50 rounded-lg text-sm text-gray-600 max-h-32 overflow-y-auto">
+				<span class="mb-2 block text-sm font-medium text-primary-700">選取的文字</span>
+				<div
+					class="max-h-32 overflow-y-auto rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-primary-700"
+				>
 					{selectedText || '（未選取文字）'}
 				</div>
 			</div>
 
 			<!-- Action buttons -->
-			<div class="flex gap-2">
+			<div class="flex gap-3">
 				<button
-					class="flex-1 py-2 px-4 rounded-lg border-2 transition-colors
+					class="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border-2 px-4 py-3 font-medium transition-all duration-150
                  {currentAction === 'summarize'
-						? 'border-purple-600 bg-purple-50'
-						: 'border-gray-200 hover:border-purple-300'}
-                 disabled:opacity-50"
+						? 'border-cta-500 bg-cta-50 text-cta-700'
+						: 'border-primary-200 text-primary-600 hover:border-cta-300 hover:bg-cta-50'}
+                 disabled:cursor-not-allowed disabled:opacity-50"
 					onclick={() => handleAction('summarize')}
 					disabled={loading || !selectedText.trim()}
 				>
+					<FileText size={18} />
 					摘要
 				</button>
 				<button
-					class="flex-1 py-2 px-4 rounded-lg border-2 transition-colors
+					class="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border-2 px-4 py-3 font-medium transition-all duration-150
                  {currentAction === 'polish'
-						? 'border-purple-600 bg-purple-50'
-						: 'border-gray-200 hover:border-purple-300'}
-                 disabled:opacity-50"
+						? 'border-cta-500 bg-cta-50 text-cta-700'
+						: 'border-primary-200 text-primary-600 hover:border-cta-300 hover:bg-cta-50'}
+                 disabled:cursor-not-allowed disabled:opacity-50"
 					onclick={() => handleAction('polish')}
 					disabled={loading || !selectedText.trim()}
 				>
+					<Wand2 size={18} />
 					潤稿
 				</button>
 			</div>
@@ -150,16 +150,17 @@
 			<!-- Result area -->
 			{#if loading}
 				<div class="flex items-center justify-center py-8">
-					<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
-					<span class="ml-3 text-gray-600">AI 處理中...</span>
+					<div class="h-8 w-8 animate-spin rounded-full border-3 border-cta-200 border-t-cta-500"
+					></div>
+					<span class="ml-3 text-primary-600">AI 處理中...</span>
 				</div>
 			{:else if result}
 				<div>
-					<span class="block text-sm font-medium text-gray-700 mb-1">
+					<span class="mb-2 block text-sm font-medium text-primary-700">
 						{actionLabels[currentAction!]}
 					</span>
 					<div
-						class="p-3 bg-purple-50 rounded-lg text-sm whitespace-pre-wrap max-h-48 overflow-y-auto"
+						class="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg border border-cta-200 bg-cta-50 p-4 text-sm text-primary-800"
 					>
 						{result}
 					</div>
@@ -169,17 +170,18 @@
 
 		<!-- Footer buttons -->
 		{#if result}
-			<div class="p-4 border-t flex justify-end gap-2">
+			<div class="flex justify-end gap-3 border-t border-primary-200 p-4">
 				<button
-					class="py-2 px-4 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
+					class="cursor-pointer rounded-lg border border-primary-300 px-4 py-2 font-medium text-primary-700 transition-colors hover:bg-primary-50"
 					onclick={close}
 				>
 					取消
 				</button>
 				<button
-					class="py-2 px-4 rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition-colors"
+					class="flex cursor-pointer items-center gap-2 rounded-lg bg-cta-500 px-4 py-2 font-medium text-white transition-colors hover:bg-cta-600"
 					onclick={handleApply}
 				>
+					<Check size={18} />
 					套用結果
 				</button>
 			</div>
