@@ -21,6 +21,10 @@ export interface Collaborator {
 const initialToken = browser ? window.localStorage.getItem('access_token') : null;
 export const token = writable<string | null>(initialToken);
 
+// Refresh token store
+const initialRefreshToken = browser ? window.localStorage.getItem('refresh_token') : null;
+export const refreshToken = writable<string | null>(initialRefreshToken);
+
 // Update localStorage whenever the token changes
 if (browser) {
 	token.subscribe((value) => {
@@ -28,6 +32,13 @@ if (browser) {
 			window.localStorage.setItem('access_token', value);
 		} else {
 			window.localStorage.removeItem('access_token');
+		}
+	});
+	refreshToken.subscribe((value) => {
+		if (value) {
+			window.localStorage.setItem('refresh_token', value);
+		} else {
+			window.localStorage.removeItem('refresh_token');
 		}
 	});
 }
@@ -41,16 +52,56 @@ export const user = writable<User | null>(null);
 // Function to log the user out
 export function logout() {
 	token.set(null);
+	refreshToken.set(null);
 	user.set(null);
 }
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
-async function apiFetch(url: string, options: RequestInit = {}) {
+// 防止多個請求同時觸發 refresh
+let refreshPromise: Promise<boolean> | null = null;
+
+/**
+ * 使用 refresh token 換取新的 access token
+ * 回傳 true 表示刷新成功，false 表示失敗（需要重新登入）
+ */
+export async function refreshAccessToken(): Promise<boolean> {
+	// 如果已經有一個 refresh 正在進行，等待它完成
+	if (refreshPromise) return refreshPromise;
+
+	refreshPromise = (async () => {
+		const storedRefreshToken = browser
+			? window.localStorage.getItem('refresh_token')
+			: null;
+		if (!storedRefreshToken) return false;
+
+		try {
+			const response = await fetch(`${API_BASE_URL}/token/refresh`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ refresh: storedRefreshToken })
+			});
+
+			if (!response.ok) return false;
+
+			const data = await response.json();
+			token.set(data.access);
+			return true;
+		} catch {
+			return false;
+		} finally {
+			refreshPromise = null;
+		}
+	})();
+
+	return refreshPromise;
+}
+
+async function apiFetch(url: string, options: RequestInit = {}, _isRetry = false) {
 	const authToken = browser ? window.localStorage.getItem('access_token') : null;
 	const headers = new Headers(options.headers || {});
 	if (authToken) {
-		headers.append('Authorization', `Bearer ${authToken}`);
+		headers.set('Authorization', `Bearer ${authToken}`);
 	}
 	if (!headers.has('Content-Type')) {
 		headers.append('Content-Type', 'application/json');
@@ -62,13 +113,18 @@ async function apiFetch(url: string, options: RequestInit = {}) {
 	});
 
 	if (!response.ok) {
-		if (response.status === 401) {
-			// Token is invalid or expired
+		if (response.status === 401 && !_isRetry) {
+			// 嘗試用 refresh token 換取新的 access token，成功則重試一次
+			const refreshed = await refreshAccessToken();
+			if (refreshed) {
+				return apiFetch(url, options, true);
+			}
+
+			// Refresh 也失敗，登出
 			logout();
 			if (browser) {
 				goto('/login');
 			}
-			// Throw an error to stop further processing
 			throw new Error('Unauthorized');
 		}
 

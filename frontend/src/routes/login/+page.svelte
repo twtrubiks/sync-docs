@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { token, fetchCurrentUser } from '$lib/auth';
+	import { token, refreshToken, fetchCurrentUser } from '$lib/auth';
 	import { goto } from '$app/navigation';
 	import { toast } from '@zerodevx/svelte-toast';
 	import { LogIn, User, Lock } from 'lucide-svelte';
@@ -22,7 +22,8 @@
 
 			if (response.ok) {
 				const data = await response.json();
-				token.set(data.access); // ninja-jwt returns { "access": "...", "refresh": "..." }
+				token.set(data.access);
+				refreshToken.set(data.refresh);
 				await fetchCurrentUser();
 				goto('/dashboard');
 			} else {

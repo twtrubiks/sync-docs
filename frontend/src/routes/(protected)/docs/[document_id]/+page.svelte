@@ -6,7 +6,7 @@
 	import VersionHistoryPanel from '$lib/components/VersionHistoryPanel.svelte';
 	import AIDialog from '$lib/components/AIDialog.svelte';
 	import CommentPanel from '$lib/components/CommentPanel.svelte';
-	import { get, put, del, post, logout, type Collaborator } from '$lib/auth';
+	import { get, put, del, post, logout, refreshAccessToken, type Collaborator } from '$lib/auth';
 	import { toast } from '@zerodevx/svelte-toast';
 	import type { QuillDelta, QuillType } from '$lib/types/quill';
 	import type { PresenceUser } from '$lib/types/cursor';
@@ -228,9 +228,23 @@
 	 * 處理 WebSocket 錯誤
 	 * 根據 close code 顯示對應的錯誤訊息並執行相應操作
 	 */
-	function handleWsError(code: number, message?: string) {
+	async function handleWsError(code: number, message?: string) {
 		switch (code) {
-			case WS_CLOSE_CODES.TOKEN_EXPIRED:
+			case WS_CLOSE_CODES.TOKEN_EXPIRED: {
+				// 嘗試用 refresh token 換取新的 access token，成功則自動重連
+				const refreshed = await refreshAccessToken();
+				if (refreshed) {
+					console.log('Token refreshed, reconnecting WebSocket...');
+					toast.push('Session refreshed.', { theme: successTheme });
+					connectWebSocket();
+					return;
+				}
+				// Refresh 也失敗，登出
+				toast.push('Session expired. Please login again.', { theme: errorTheme });
+				logout();
+				goto('/login');
+				break;
+			}
 			case WS_CLOSE_CODES.AUTH_FAILED:
 				toast.push('Session expired. Please login again.', { theme: errorTheme });
 				logout();
@@ -392,6 +406,12 @@
 
 			// 正常關閉或離開頁面
 			if (event.code === 1000 || event.code === 1001) return;
+
+			// Token 過期：嘗試刷新後重連（由 handleWsError 內部處理）
+			if (event.code === WS_CLOSE_CODES.TOKEN_EXPIRED) {
+				handleWsError(event.code, event.reason);
+				return;
+			}
 
 			// 永久性錯誤（後端主動關閉）
 			if (event.code >= 4001 && event.code <= 4008) {
