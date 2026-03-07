@@ -48,6 +48,12 @@
 		'--toastBarBackground': '#C05621'
 	};
 
+	const successTheme = {
+		'--toastBackground': '#48BB78',
+		'--toastColor': 'white',
+		'--toastBarBackground': '#2F855A'
+	};
+
 	// Svelte 5: $page store auto-subscription still works
 	const documentId = $page.params.document_id;
 
@@ -67,6 +73,12 @@
 	let throttleTimeout: ReturnType<typeof setTimeout> | undefined = $state(undefined);
 	let lastSendTime = $state(0);
 	const THROTTLE_INTERVAL = 150; // ms（100-200ms 範圍）
+
+	// Reconnect state
+	let reconnectAttempts = $state(0);
+	let reconnectTimer: ReturnType<typeof setTimeout> | undefined = $state(undefined);
+	const MAX_RECONNECT_ATTEMPTS = 5;
+	const BASE_RECONNECT_DELAY = 1000; // 1s
 
 	// Permission state (from API and WebSocket)
 	let canWrite = $state(true);
@@ -245,6 +257,172 @@
 		}
 	}
 
+	/**
+	 * 計算重連延遲（指數退避 + 隨機抖動）
+	 * 1s → 2s → 4s → 8s → 16s（上限 30s）
+	 */
+	function getReconnectDelay(): number {
+		const delay = Math.min(BASE_RECONNECT_DELAY * 2 ** reconnectAttempts, 30000);
+		return delay + delay * 0.5 * Math.random();
+	}
+
+	/**
+	 * 建立 WebSocket 連線（初始連線與重連共用）
+	 */
+	function connectWebSocket() {
+		// Guard: 清理可能仍開啟的舊連線
+		if (socket) {
+			socket.onclose = null;
+			socket.close();
+			socket = null;
+		}
+
+		const token = localStorage.getItem('access_token');
+		if (!token) {
+			console.error('No auth token found, WebSocket connection aborted.');
+			saveStatus = 'error';
+			return;
+		}
+		const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+		// 使用 subprotocol 傳遞 token，而非 URL query string（更安全）
+		const wsUrl = `${wsProtocol}//localhost:8000/ws/docs/${documentId}/`;
+		socket = new WebSocket(wsUrl, [`access_token.${token}`]);
+
+		socket.onopen = () => {
+			console.log('WebSocket connection established');
+			if (reconnectAttempts > 0) {
+				toast.push('Connection restored.', { theme: successTheme });
+			}
+			reconnectAttempts = 0;
+			saveStatus = 'idle';
+		};
+
+		socket.onmessage = (event) => {
+			const data = JSON.parse(event.data);
+
+			switch (data.type) {
+				case 'connection_success':
+					// Update permission from WebSocket connection
+					canWrite = data.can_write;
+					currentUserId = data.user_id;
+					console.log(`WebSocket connected, can_write: ${canWrite}, user_id: ${currentUserId}`);
+					break;
+				case 'doc_update':
+					if (data.delta && editor) {
+						editor.updateContents(data.delta, 'silent');
+					}
+					break;
+				case 'doc_saved':
+					if (data.updated_at) {
+						lastSavedTime = data.updated_at;
+						if (saveStatus === 'saving') {
+							saveStatus = 'saved';
+							setTimeout(() => {
+								if (saveStatus === 'saved') saveStatus = 'idle';
+							}, 2000);
+						}
+					}
+					break;
+				case 'cursor_move':
+					// 更新其他用戶的游標
+					quillEditor?.setCursor(data.user_id, data.username, data.color, data.cursor);
+					break;
+				case 'user_join':
+					// 用戶加入
+					onlineUsers.set(data.user_id, {
+						user_id: data.user_id,
+						username: data.username,
+						color: data.color
+					});
+					onlineUsers = new Map(onlineUsers); // Svelte 5: 創建新 Map 觸發響應式
+					break;
+				case 'user_leave':
+					// 用戶離開
+					onlineUsers.delete(data.user_id);
+					onlineUsers = new Map(onlineUsers); // Svelte 5: 創建新 Map 觸發響應式
+					quillEditor?.removeCursor(data.user_id);
+					break;
+				case 'presence_sync': {
+					// 同步在線用戶列表
+					const newMap = new Map<string, PresenceUser>();
+					for (const user of data.users) {
+						newMap.set(user.user_id, {
+							user_id: user.user_id,
+							username: user.username,
+							color: user.color
+						});
+					}
+					onlineUsers = newMap; // Svelte 5: 創建新 Map 觸發響應式
+					break;
+				}
+				case 'connection_error':
+					// 連接錯誤會在 onclose 之前收到，記錄到 console
+					console.warn('WebSocket connection error:', data.error_code, data.message);
+					break;
+				case 'error':
+					// 運行時錯誤（如 RATE_LIMITED, READ_ONLY）- 連接保持
+					if (data.error_code === 'RATE_LIMITED' && data.retry_after) {
+						toast.push(`Too fast! Wait ${Math.ceil(data.retry_after)}s`, {
+							theme: warningTheme
+						});
+					} else if (data.error_code === 'READ_ONLY') {
+						toast.push('You have read-only access to this document.', {
+							theme: warningTheme
+						});
+					} else {
+						toast.push(data.message || 'An error occurred.', { theme: errorTheme });
+					}
+					break;
+				// Comment events
+				case 'comment_add':
+					commentPanel?.addCommentFromWS(data.comment);
+					break;
+				case 'comment_update':
+					commentPanel?.updateCommentFromWS(data.comment_id, data.content, data.updated_at);
+					break;
+				case 'comment_delete':
+					commentPanel?.removeCommentFromWS(data.comment_id);
+					break;
+			}
+		};
+
+		socket.onclose = (event) => {
+			console.log('WebSocket closed:', event.code, event.reason);
+			socket = null;
+
+			// 正常關閉或離開頁面
+			if (event.code === 1000 || event.code === 1001) return;
+
+			// 永久性錯誤（後端主動關閉）
+			if (event.code >= 4001 && event.code <= 4008) {
+				saveStatus = 'error';
+				handleWsError(event.code, event.reason);
+				return;
+			}
+
+			// 暫時性錯誤 → 嘗試自動重連
+			if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+				const delay = getReconnectDelay();
+				console.log(
+					`Reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})...`
+				);
+				saveStatus = 'connecting';
+				clearTimeout(reconnectTimer);
+				reconnectTimer = setTimeout(() => {
+					reconnectAttempts++;
+					connectWebSocket();
+				}, delay);
+			} else {
+				saveStatus = 'error';
+				toast.push('Connection lost. Please refresh the page.', { theme: errorTheme });
+			}
+		};
+
+		socket.onerror = (error) => {
+			console.error('WebSocket error:', error);
+		};
+	}
+
 	onMount(async () => {
 		try {
 			const doc = await get(`/documents/${documentId}/`);
@@ -256,128 +434,7 @@
 				content = doc.content || { ops: [] };
 			}
 
-			const token = localStorage.getItem('access_token');
-			if (!token) {
-				console.error('No auth token found, WebSocket connection aborted.');
-				saveStatus = 'error';
-				return;
-			}
-			const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-			// 使用 subprotocol 傳遞 token，而非 URL query string（更安全）
-			const wsUrl = `${wsProtocol}//localhost:8000/ws/docs/${documentId}/`;
-			socket = new WebSocket(wsUrl, [`access_token.${token}`]);
-
-			socket.onopen = () => {
-				console.log('WebSocket connection established');
-				saveStatus = 'idle';
-			};
-
-			socket.onmessage = (event) => {
-				const data = JSON.parse(event.data);
-
-				switch (data.type) {
-					case 'connection_success':
-						// Update permission from WebSocket connection
-						canWrite = data.can_write;
-						currentUserId = data.user_id;
-						console.log(`WebSocket connected, can_write: ${canWrite}, user_id: ${currentUserId}`);
-						break;
-					case 'doc_update':
-						if (data.delta && editor) {
-							editor.updateContents(data.delta, 'silent');
-						}
-						break;
-					case 'doc_saved':
-						if (data.updated_at) {
-							lastSavedTime = data.updated_at;
-							if (saveStatus === 'saving') {
-								saveStatus = 'saved';
-								setTimeout(() => {
-									if (saveStatus === 'saved') saveStatus = 'idle';
-								}, 2000);
-							}
-						}
-						break;
-					case 'cursor_move':
-						// 更新其他用戶的游標
-						quillEditor?.setCursor(data.user_id, data.username, data.color, data.cursor);
-						break;
-					case 'user_join':
-						// 用戶加入
-						onlineUsers.set(data.user_id, {
-							user_id: data.user_id,
-							username: data.username,
-							color: data.color
-						});
-						onlineUsers = new Map(onlineUsers); // Svelte 5: 創建新 Map 觸發響應式
-						break;
-					case 'user_leave':
-						// 用戶離開
-						onlineUsers.delete(data.user_id);
-						onlineUsers = new Map(onlineUsers); // Svelte 5: 創建新 Map 觸發響應式
-						quillEditor?.removeCursor(data.user_id);
-						break;
-					case 'presence_sync': {
-						// 同步在線用戶列表
-						const newMap = new Map<string, PresenceUser>();
-						for (const user of data.users) {
-							newMap.set(user.user_id, {
-								user_id: user.user_id,
-								username: user.username,
-								color: user.color
-							});
-						}
-						onlineUsers = newMap; // Svelte 5: 創建新 Map 觸發響應式
-						break;
-					}
-					case 'connection_error':
-						// 連接錯誤會在 onclose 之前收到，記錄到 console
-						console.warn('WebSocket connection error:', data.error_code, data.message);
-						break;
-					case 'error':
-						// 運行時錯誤（如 RATE_LIMITED, READ_ONLY）- 連接保持
-						if (data.error_code === 'RATE_LIMITED' && data.retry_after) {
-							toast.push(`Too fast! Wait ${Math.ceil(data.retry_after)}s`, {
-								theme: warningTheme
-							});
-						} else if (data.error_code === 'READ_ONLY') {
-							toast.push('You have read-only access to this document.', {
-								theme: warningTheme
-							});
-						} else {
-							toast.push(data.message || 'An error occurred.', { theme: errorTheme });
-						}
-						break;
-					// Comment events
-					case 'comment_add':
-						commentPanel?.addCommentFromWS(data.comment);
-						break;
-					case 'comment_update':
-						commentPanel?.updateCommentFromWS(data.comment_id, data.content, data.updated_at);
-						break;
-					case 'comment_delete':
-						commentPanel?.removeCommentFromWS(data.comment_id);
-						break;
-				}
-			};
-
-			socket.onclose = (event) => {
-				console.log('WebSocket closed:', event.code, event.reason);
-				saveStatus = 'error';
-
-				// 根據 close code 處理
-				if (event.code >= 4001 && event.code <= 4008) {
-					handleWsError(event.code, event.reason);
-				} else if (event.code !== 1000 && event.code !== 1001) {
-					// 非正常關閉（1000=正常, 1001=離開頁面）
-					toast.push('Connection lost. Please refresh the page.', { theme: errorTheme });
-				}
-			};
-
-			socket.onerror = (error) => {
-				console.error('WebSocket error:', error);
-				saveStatus = 'error';
-			};
+			connectWebSocket();
 		} catch (error) {
 			console.error('Failed to fetch document:', error);
 			saveStatus = 'error';
@@ -576,6 +633,7 @@
 			socket.send(JSON.stringify({ delta: pendingDelta }));
 		}
 
+		clearTimeout(reconnectTimer);
 		if (socket) {
 			// Prevent the onclose handler from firing when we navigate away
 			socket.onclose = null;
