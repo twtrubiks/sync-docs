@@ -880,11 +880,11 @@ WEBSOCKET_MAX_CONNECTIONS_PER_USER = 5
 # 連接 TTL（秒）- 防止連線殘留
 WEBSOCKET_CONNECTION_TTL = 300  # 5 分鐘
 
-# 心跳間隔（秒）- 刷新活躍連線 TTL
+# 心跳間隔（秒）- 刷新活躍連線與 Presence TTL
 WEBSOCKET_HEARTBEAT_INTERVAL = 120  # 2 分鐘
 ```
 - ✅ 自動過期：連線記錄 5 分鐘後自動清除
-- ✅ 心跳刷新：活躍連線每 2 分鐘刷新 TTL
+- ✅ 心跳刷新：活躍連線每 2 分鐘刷新連線與 Presence TTL
 - ✅ Fail-Closed：Redis 錯誤時拒絕新連線（安全優先）
 - ✅ 重試機制：移除連線時最多重試 3 次（指數退避）
 
@@ -1021,7 +1021,7 @@ Members: [channel_name_1, channel_name_2, ...]
 TTL: 300 秒（5 分鐘）
 ```
 - Lua 腳本確保原子性（檢查 + 添加在同一操作）
-- 心跳刷新 TTL，防止活躍連線被誤清除
+- 心跳刷新連線與 Presence TTL，防止活躍連線被誤清除
 - 異常斷線時由 TTL 自動清理（無需手動清除）
 
 **速率限制（Sorted Set）：**

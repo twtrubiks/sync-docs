@@ -690,9 +690,10 @@ class DocConsumer(AsyncWebsocketConsumer):
 
     async def _heartbeat_loop(self):
         """
-        心跳循環：定期刷新連接 TTL
+        心跳循環：定期刷新連接與 Presence TTL
 
-        這確保活躍的連接不會因為 TTL 過期而被誤認為斷開。
+        這確保活躍的連接不會因為 TTL 過期而被誤認為斷開，
+        同時保持用戶在 Presence 在線列表中的可見性。
         如果連接真的斷開，這個 task 會被取消，TTL 會自然過期。
         """
         try:
@@ -705,7 +706,8 @@ class DocConsumer(AsyncWebsocketConsumer):
                         await connection_manager.refresh_connection(
                             self.user.id, self.channel_name
                         )
-                        logger.debug(f"心跳：刷新用戶 {self.user.id} 的連接 TTL")
+                        await self.refresh_presence_ttl()
+                        logger.debug(f"心跳：刷新用戶 {self.user.id} 的連接和 presence TTL")
                 except Exception as e:
                     # 記錄錯誤但繼續循環，不中斷心跳
                     logger.error(f"心跳刷新發生錯誤: {str(e)}")

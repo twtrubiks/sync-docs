@@ -7,7 +7,10 @@
 import json
 import asyncio
 import pytest
+from unittest.mock import patch, AsyncMock
 from channels.testing import WebsocketCommunicator
+
+from docs_app.consumers import DocConsumer
 
 
 @pytest.mark.django_db(transaction=True)
@@ -252,6 +255,41 @@ class TestCursorPresence:
         assert data['color'].startswith('#')  # 顏色為 hex 格式
 
         await comm.disconnect()
+
+    async def test_heartbeat_refreshes_presence_ttl(
+        self, websocket_application, test_document, jwt_token_for_user
+    ):
+        """測試心跳循環會同時刷新連線與 presence TTL"""
+        from docs_app.tests.test_websocket_integration import consume_connection_success
+
+        with patch('docs_app.consumers.HEARTBEAT_INTERVAL', 0.5), \
+             patch.object(
+                 DocConsumer, 'refresh_presence_ttl', new_callable=AsyncMock
+             ) as mock_refresh:
+
+            comm = WebsocketCommunicator(
+                websocket_application,
+                f"/ws/docs/{test_document.id}/",
+                subprotocols=[f"access_token.{jwt_token_for_user}"]
+            )
+
+            await comm.connect()
+            await consume_connection_success(comm)
+
+            # connect 過程中不應呼叫 refresh_presence_ttl
+            # （只呼叫 add_user_to_presence）
+            mock_refresh.assert_not_called()
+
+            # 等待心跳觸發（interval=0.5s，等 1.5s 確保至少觸發一次）
+            await asyncio.sleep(1.5)
+
+            assert mock_refresh.call_count >= 1, (
+                "心跳未呼叫 refresh_presence_ttl，"
+                "presence TTL 不會被心跳刷新，"
+                "用戶不移動游標時 presence 會在 5 分鐘後過期"
+            )
+
+            await comm.disconnect()
 
     async def test_cursor_move_invalid_format(
         self, websocket_application, test_document, jwt_token_for_user
