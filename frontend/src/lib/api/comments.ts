@@ -23,6 +23,9 @@ export interface Comment {
 export interface CommentListResponse {
 	comments: Comment[];
 	total: number;
+	page: number;
+	page_size: number;
+	total_pages: number;
 }
 
 /**
@@ -43,10 +46,16 @@ export interface CommentUpdatePayload {
 // ============ API 函數 ============
 
 /**
- * 取得評論列表（頂層評論）
+ * 取得評論列表（頂層評論，支援分頁）
  */
-export async function getComments(documentId: string): Promise<CommentListResponse> {
-	return get(`/documents/${documentId}/comments/`) as Promise<CommentListResponse>;
+export async function getComments(
+	documentId: string,
+	page: number = 1,
+	pageSize: number = 20
+): Promise<CommentListResponse> {
+	return get(
+		`/documents/${documentId}/comments/?page=${page}&page_size=${pageSize}`
+	) as Promise<CommentListResponse>;
 }
 
 /**

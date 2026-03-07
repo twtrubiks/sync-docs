@@ -121,15 +121,23 @@ def test_list_own_documents(authenticated_client, create_user):
     assert response.status_code == 200, f"List documents failed: {response.content.decode()}"
     response_data = response.json()
 
-    assert len(response_data) == 2  # user1 應該只能看到自己的 2 個文檔
+    # 分頁回應格式
+    assert response_data["total"] == 2  # user1 應該只能看到自己的 2 個文檔
+    assert "items" in response_data
+    assert "page" in response_data
+    assert "page_size" in response_data
+    assert "total_pages" in response_data
 
-    response_titles = {doc["title"] for doc in response_data}
+    items = response_data["items"]
+    assert len(items) == 2
+
+    response_titles = {doc["title"] for doc in items}
     assert doc1_user1.title in response_titles
     assert doc2_user1.title in response_titles
     assert doc1_user2.title not in response_titles  # 確保 user2 的文檔不在清單中
 
     # 檢查回應中每個文檔的擁有者 ID
-    for doc_data in response_data:
+    for doc_data in items:
         assert doc_data["owner"]["id"] == user1.id
 
 

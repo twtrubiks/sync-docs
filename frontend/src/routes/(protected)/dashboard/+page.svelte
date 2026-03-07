@@ -1,30 +1,34 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { get, post, del, type User } from '$lib/auth';
+	import { post, del } from '$lib/auth';
+	import { getDocuments, type Document } from '$lib/api/documents';
 	import { Plus, FileText, Trash2, User as UserIcon, Eye, Pencil } from 'lucide-svelte';
-
-	interface Document {
-		id: string; // Changed from number to string for UUID
-		title: string;
-		is_owner: boolean;
-		owner: User;
-		permission: 'read' | 'write' | null; // User's permission level for shared docs
-		can_write: boolean; // Whether user can edit
-	}
 
 	// Svelte 5 Runes: use $state() for reactive state
 	let documents = $state<Document[]>([]);
 	let loading = $state(true);
+	let currentPage = $state(1);
+	let totalPages = $state(1);
+	let total = $state(0);
 
-	onMount(async () => {
+	async function fetchDocuments(page: number = 1) {
+		loading = true;
 		try {
-			documents = await get('/documents/');
+			const result = await getDocuments(page);
+			documents = result.items;
+			currentPage = result.page;
+			totalPages = result.total_pages;
+			total = result.total;
 		} catch (error) {
 			console.error('Failed to fetch documents:', error);
 		} finally {
 			loading = false;
 		}
+	}
+
+	onMount(() => {
+		fetchDocuments();
 	});
 
 	async function createNewDocument() {
@@ -42,7 +46,9 @@
 		}
 		try {
 			await del(`/documents/${documentId}/`);
-			documents = documents.filter((doc) => doc.id !== documentId);
+			// 重新取得當前頁（如果當前頁只剩一筆且不是第一頁，回到上一頁）
+			const targetPage = documents.length === 1 && currentPage > 1 ? currentPage - 1 : currentPage;
+			await fetchDocuments(targetPage);
 		} catch (error) {
 			console.error('Failed to delete document:', error);
 		}
@@ -141,6 +147,36 @@
 					</li>
 				{/each}
 			</ul>
+
+			<!-- 分頁控制 -->
+			{#if totalPages > 1}
+				<div
+					class="flex items-center justify-between border-t border-primary-100 px-5 py-3"
+				>
+					<span class="text-sm text-primary-500">
+						共 {total} 個文件
+					</span>
+					<div class="flex items-center gap-2">
+						<button
+							onclick={() => fetchDocuments(currentPage - 1)}
+							disabled={currentPage <= 1}
+							class="cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium text-primary-700 transition-colors hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							上一頁
+						</button>
+						<span class="text-sm text-primary-600">
+							{currentPage} / {totalPages}
+						</span>
+						<button
+							onclick={() => fetchDocuments(currentPage + 1)}
+							disabled={currentPage >= totalPages}
+							class="cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium text-primary-700 transition-colors hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							下一頁
+						</button>
+					</div>
+				</div>
+			{/if}
 		{/if}
 	</div>
 </div>

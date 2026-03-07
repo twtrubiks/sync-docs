@@ -12,17 +12,18 @@ from django.contrib.auth.models import User
 from django.db.models import Q
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from .pagination import paginate_queryset
 from .schemas import (
     ShareRequestSchema,
     CollaboratorSchema,
     UpdateCollaboratorPermissionSchema,
-    DocumentListSchema,
     DocumentSchema,
     DocumentCreateSchema,
     DocumentUpdateSchema,
-    VersionListItemSchema,
     VersionDetailSchema,
     RestoreVersionResponseSchema,
+    PaginatedDocumentListSchema,
+    PaginatedVersionListSchema,
 )
 
 # 獲取日誌記錄器
@@ -140,22 +141,35 @@ class DocumentController:
             logger.error(f"用戶 {user.username} 創建文檔失敗: {str(e)}")
             raise
 
-    @http_get("/", response=List[DocumentListSchema])
-    def list_documents(self):
+    @http_get("/", response=PaginatedDocumentListSchema)
+    def list_documents(self, page: int = 1, page_size: int = 0):
         """
-        獲取用戶擁有或被分享的文檔列表
+        獲取用戶擁有或被分享的文檔列表（支援分頁）
+
+        Args:
+            page: 頁碼（從 1 開始）
+            page_size: 每頁筆數（預設使用 settings.DEFAULT_PAGE_SIZE）
 
         Returns:
-            List[DocumentListSchema]: 文檔列表，包含基本信息和權限標誌
+            PaginatedDocumentListSchema: 分頁文檔列表
         """
         user = self.context.request.auth
         query = self._get_user_accessible_documents_query(user)
         documents = Document.objects.select_related('owner').filter(query).distinct()
 
-        # 為每個文檔設置權限標誌
-        self._set_document_permissions(documents, user)
+        page_obj, page_size = paginate_queryset(documents, page, page_size)
 
-        return documents
+        # 為分頁後的文檔設置權限標誌
+        documents_list = list(page_obj.object_list)
+        self._set_document_permissions(documents_list, user)
+
+        return PaginatedDocumentListSchema(
+            items=documents_list,
+            total=page_obj.paginator.count,
+            page=page_obj.number,
+            page_size=page_size,
+            total_pages=page_obj.paginator.num_pages,
+        )
 
     @http_get("/{document_id}/", response=DocumentSchema)
     def get_document(self, document_id: uuid.UUID):
@@ -376,26 +390,35 @@ class DocumentController:
 
     # ============ 版本歷史相關 API ============
 
-    @http_get("/{document_id}/versions/", response=List[VersionListItemSchema])
-    def list_versions(self, document_id: uuid.UUID):
+    @http_get("/{document_id}/versions/", response=PaginatedVersionListSchema)
+    def list_versions(self, document_id: uuid.UUID, page: int = 1, page_size: int = 0):
         """
-        列出文件的所有版本
+        列出文件的所有版本（支援分頁）
 
         Args:
             document_id: 文檔的UUID
+            page: 頁碼（從 1 開始）
+            page_size: 每頁筆數（預設使用 settings.DEFAULT_PAGE_SIZE）
 
         Returns:
-            List[VersionListItemSchema]: 版本列表（最多50個，按版本號降序排列）
+            PaginatedVersionListSchema: 分頁版本列表（按版本號降序排列）
         """
         user = self.context.request.auth
-        # 使用現有的權限檢查方法
         document = self._get_document_with_permission_check(document_id, user)
 
         versions = DocumentVersion.objects.filter(
             document=document
-        ).select_related('created_by').order_by('-version_number')[:50]
+        ).select_related('created_by').order_by('-version_number')
 
-        return versions
+        page_obj, page_size = paginate_queryset(versions, page, page_size)
+
+        return PaginatedVersionListSchema(
+            items=list(page_obj.object_list),
+            total=page_obj.paginator.count,
+            page=page_obj.number,
+            page_size=page_size,
+            total_pages=page_obj.paginator.num_pages,
+        )
 
     @http_get("/{document_id}/versions/{version_id}/", response=VersionDetailSchema)
     def get_version(self, document_id: uuid.UUID, version_id: uuid.UUID):

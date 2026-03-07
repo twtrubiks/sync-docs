@@ -22,7 +22,7 @@ vi.mock('$app/environment', () => ({
 
 import { getVersions, getVersionDetail, restoreVersion } from '$lib/api/versions';
 
-const mockVersions = [
+const mockVersionItems = [
 	{
 		id: 'version-1',
 		version_number: 2,
@@ -37,10 +37,18 @@ const mockVersions = [
 	}
 ];
 
+const mockPaginatedResponse = {
+	items: mockVersionItems,
+	total: 2,
+	page: 1,
+	page_size: 20,
+	total_pages: 1
+};
+
 describe('VersionHistoryPanel', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		vi.mocked(getVersions).mockResolvedValue(mockVersions);
+		vi.mocked(getVersions).mockResolvedValue(mockPaginatedResponse);
 	});
 
 	it('should load versions when opened', async () => {
@@ -52,7 +60,7 @@ describe('VersionHistoryPanel', () => {
 		});
 
 		await waitFor(() => {
-			expect(getVersions).toHaveBeenCalledWith('doc-123');
+			expect(getVersions).toHaveBeenCalledWith('doc-123', 1);
 		});
 
 		expect(screen.getByText('版本 2')).toBeInTheDocument();
@@ -71,7 +79,13 @@ describe('VersionHistoryPanel', () => {
 	});
 
 	it('should show empty state message', async () => {
-		vi.mocked(getVersions).mockResolvedValue([]);
+		vi.mocked(getVersions).mockResolvedValue({
+			items: [],
+			total: 0,
+			page: 1,
+			page_size: 20,
+			total_pages: 1
+		});
 
 		render(VersionHistoryPanel, {
 			props: {
@@ -87,7 +101,7 @@ describe('VersionHistoryPanel', () => {
 
 	it('should load version detail when clicked', async () => {
 		vi.mocked(getVersionDetail).mockResolvedValue({
-			...mockVersions[0],
+			...mockVersionItems[0],
 			content: { ops: [{ insert: 'test' }] }
 		});
 
@@ -109,7 +123,7 @@ describe('VersionHistoryPanel', () => {
 
 	it('should show restore button when version is selected', async () => {
 		vi.mocked(getVersionDetail).mockResolvedValue({
-			...mockVersions[0],
+			...mockVersionItems[0],
 			content: { ops: [{ insert: 'test' }] }
 		});
 
@@ -134,7 +148,7 @@ describe('VersionHistoryPanel', () => {
 	it('should call restore API and callback when restored', async () => {
 		const onRestore = vi.fn();
 		vi.mocked(getVersionDetail).mockResolvedValue({
-			...mockVersions[0],
+			...mockVersionItems[0],
 			content: { ops: [{ insert: 'test' }] }
 		});
 		vi.mocked(restoreVersion).mockResolvedValue({
@@ -182,7 +196,7 @@ describe('VersionHistoryPanel', () => {
 
 		await waitFor(() => {
 			// 因為有多個版本都是同一用戶創建，所以用 getAllByText
-			const elements = screen.getAllByText('由 testuser 編輯');
+			const elements = screen.getAllByText('testuser');
 			expect(elements.length).toBe(2);
 		});
 	});

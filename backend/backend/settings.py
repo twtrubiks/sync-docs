@@ -284,6 +284,10 @@ log_dir = BASE_DIR / 'logs'
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 
+# 分頁設定
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
+
 # AI 設定
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3-flash-preview')

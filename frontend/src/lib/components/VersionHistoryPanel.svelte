@@ -19,22 +19,48 @@
 
 	let versions = $state<DocumentVersion[]>([]);
 	let loading = $state(false);
+	let loadingMore = $state(false);
 	let selectedVersion = $state<DocumentVersion | null>(null);
 	let previewContent = $state<Record<string, unknown> | null>(null);
 	let restoring = $state(false);
+	let currentPage = $state(1);
+	let totalPages = $state(1);
+	let hasMore = $derived(currentPage < totalPages);
 
-	// 載入版本列表
+	// 載入版本列表（第一頁）
 	async function loadVersions() {
 		if (!browser) return;
 
 		loading = true;
+		currentPage = 1;
 		try {
-			versions = await getVersions(documentId);
+			const result = await getVersions(documentId, 1);
+			versions = result.items;
+			totalPages = result.total_pages;
+			currentPage = result.page;
 		} catch (error) {
 			toast.push('載入版本失敗', { theme: { '--toastBackground': '#ef4444' } });
 			console.error('Failed to load versions:', error);
 		} finally {
 			loading = false;
+		}
+	}
+
+	// 載入更多版本
+	async function loadMore() {
+		if (!browser || loadingMore || !hasMore) return;
+
+		loadingMore = true;
+		try {
+			const result = await getVersions(documentId, currentPage + 1);
+			versions = [...versions, ...result.items];
+			currentPage = result.page;
+			totalPages = result.total_pages;
+		} catch (error) {
+			toast.push('載入更多版本失敗', { theme: { '--toastBackground': '#ef4444' } });
+			console.error('Failed to load more versions:', error);
+		} finally {
+			loadingMore = false;
 		}
 	}
 
@@ -167,6 +193,25 @@
 						</button>
 					{/each}
 				</div>
+				{#if hasMore}
+					<div class="p-4 text-center">
+						<button
+							type="button"
+							class="cursor-pointer rounded-lg px-4 py-2 text-sm font-medium text-primary-600 transition-colors hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-50"
+							onclick={loadMore}
+							disabled={loadingMore}
+						>
+							{#if loadingMore}
+								<span class="inline-flex items-center gap-2">
+									<span class="h-4 w-4 animate-spin rounded-full border-2 border-primary-300 border-t-primary-600"></span>
+									載入中...
+								</span>
+							{:else}
+								載入更多版本
+							{/if}
+						</button>
+					</div>
+				{/if}
 			{/if}
 		</div>
 

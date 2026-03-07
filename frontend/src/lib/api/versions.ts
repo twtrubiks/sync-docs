@@ -18,9 +18,24 @@ export interface RestoreVersionResponse {
 	new_version_number: number;
 }
 
-// 取得版本列表
-export async function getVersions(documentId: string): Promise<DocumentVersion[]> {
-	return get(`/documents/${documentId}/versions/`) as Promise<DocumentVersion[]>;
+// 版本列表分頁回應
+export interface PaginatedVersionResponse {
+	items: DocumentVersion[];
+	total: number;
+	page: number;
+	page_size: number;
+	total_pages: number;
+}
+
+// 取得版本列表（支援分頁）
+export async function getVersions(
+	documentId: string,
+	page: number = 1,
+	pageSize: number = 20
+): Promise<PaginatedVersionResponse> {
+	return get(
+		`/documents/${documentId}/versions/?page=${page}&page_size=${pageSize}`
+	) as Promise<PaginatedVersionResponse>;
 }
 
 // 取得版本詳情

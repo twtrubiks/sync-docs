@@ -16,6 +16,7 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
 from .models import Document, Comment
+from .pagination import paginate_queryset
 from .schemas import (
     CommentCreateSchema,
     CommentUpdateSchema,
@@ -86,8 +87,8 @@ class CommentController:
             logger.error(f"廣播評論事件失敗: {e}")
 
     @http_get("/{document_id}/comments/", response=CommentListSchema)
-    def list_comments(self, document_id: uuid.UUID):
-        """列出文件的所有評論"""
+    def list_comments(self, document_id: uuid.UUID, page: int = 1, page_size: int = 0):
+        """列出文件的所有評論（支援分頁）"""
         user = self.context.request.auth
         document = self._get_document_with_permission_check(document_id, user)
 
@@ -98,12 +99,14 @@ class CommentController:
             parent__isnull=True
         ).select_related('author').prefetch_related('replies').order_by('-created_at')
 
+        page_obj, page_size = paginate_queryset(comments, page, page_size)
+
         # 判斷當前用戶是否是文件擁有者
         is_doc_owner = (document.owner == user)
 
         # 轉換為 Schema，標記當前用戶是否為作者和是否可刪除
         result = []
-        for comment in comments:
+        for comment in page_obj.object_list:
             is_author = (comment.author == user)
             result.append(CommentSchema(
                 id=comment.id,
@@ -117,7 +120,13 @@ class CommentController:
                 can_delete=(is_author or is_doc_owner)
             ))
 
-        return CommentListSchema(comments=result, total=len(result))
+        return CommentListSchema(
+            comments=result,
+            total=page_obj.paginator.count,
+            page=page_obj.number,
+            page_size=page_size,
+            total_pages=page_obj.paginator.num_pages,
+        )
 
     @http_get("/{document_id}/comments/{comment_id}/replies/", response=List[CommentSchema])
     def list_replies(self, document_id: uuid.UUID, comment_id: uuid.UUID):

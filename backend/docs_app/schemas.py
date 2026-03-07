@@ -284,3 +284,26 @@ class CommentListSchema(Schema):
     """評論列表回應"""
     comments: List[CommentSchema]
     total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+# ============ 分頁相關 Schema ============
+
+class PaginatedDocumentListSchema(Schema):
+    """分頁文檔列表回應"""
+    items: List[DocumentListSchema]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class PaginatedVersionListSchema(Schema):
+    """分頁版本列表回應"""
+    items: List[VersionListItemSchema]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

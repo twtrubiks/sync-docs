@@ -125,14 +125,17 @@ class TestVersionAPI:
         response = auth_client.get(f'/api/documents/{test_document.id}/versions/')
         assert response.status_code == 200
         data = response.json()
-        assert len(data) == 1
-        assert data[0]['version_number'] == 1
+        assert data['total'] == 1
+        assert len(data['items']) == 1
+        assert data['items'][0]['version_number'] == 1
 
     def test_list_versions_empty(self, auth_client, test_document):
         """測試列出空版本列表"""
         response = auth_client.get(f'/api/documents/{test_document.id}/versions/')
         assert response.status_code == 200
-        assert response.json() == []
+        data = response.json()
+        assert data['total'] == 0
+        assert data['items'] == []
 
     def test_list_versions_order(self, auth_client, test_document, test_user):
         """測試版本列表按版本號降序排列"""
@@ -142,9 +145,10 @@ class TestVersionAPI:
         response = auth_client.get(f'/api/documents/{test_document.id}/versions/')
         assert response.status_code == 200
         data = response.json()
-        assert len(data) == 5
+        assert data['total'] == 5
+        assert len(data['items']) == 5
         # 確認是降序
-        version_numbers = [v['version_number'] for v in data]
+        version_numbers = [v['version_number'] for v in data['items']]
         assert version_numbers == [5, 4, 3, 2, 1]
 
     def test_get_version_detail(self, auth_client, test_document, test_version):
