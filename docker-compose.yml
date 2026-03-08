@@ -2,8 +2,6 @@
 x-base-app-setting: &x-base-app
   image: sync-docs
   build: ./backend
-  volumes:
-    - ./backend:/sync-docs
 
 services:
 
@@ -15,26 +13,28 @@ services:
       <<: *x-base-app
       command: bash -c "pytest --cov=. --cov-report=html"
       # command: bash -c "pytest -s" # print log
+      volumes:
+        - ./backend:/sync-docs
       profiles:
         - "testing"
 
     backend:
       <<: *x-base-app
-      command: bash -c "python manage.py runserver 0.0.0.0:8000"
+      # 生產環境使用 Daphne ASGI 伺服器（支援 HTTP + WebSocket）
+      command: bash -c "daphne -b 0.0.0.0 -p 8000 backend.asgi:application"
       restart: always
       ports:
         - "8000:8000"
       environment:
-        # TODO: 正式環境請更換為安全密鑰和密碼
-        - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:-django-insecure-dev-only-key}
-        - DJANGO_DEBUG=${DJANGO_DEBUG:-True}
-        - DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS:-*}
+        - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
+        - DJANGO_DEBUG=${DJANGO_DEBUG:-False}
+        - DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS}
         - POSTGRES_HOST=django-postgres
         - POSTGRES_DB=${POSTGRES_DB:-postgres}
         - POSTGRES_USER=${POSTGRES_USER:-myuser}
-        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password123}
+        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
         - REDIS_HOST=django-redis
-        - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+        - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
         - GEMINI_API_KEY=${GEMINI_API_KEY:-}
         - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3-flash-preview}
       depends_on:
@@ -46,10 +46,9 @@ services:
       # ports:
       #   - "5432:5432"
       environment:
-        # TODO: 正式環境請更換為安全密碼
         - POSTGRES_DB=${POSTGRES_DB:-postgres}
         - POSTGRES_USER=${POSTGRES_USER:-myuser}
-        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password123}
+        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
         - PGDATA=/var/lib/postgresql/data/pgdata
       volumes:
         - db-data:/var/lib/postgresql/data/pgdata
@@ -64,13 +63,14 @@ services:
         - redis-data:/data
 
     # 前端 SvelteKit 服務
+    # 注意：前端生產部署需要切換至 @sveltejs/adapter-node 並修改 Dockerfile
     frontend:
       build: ./frontend
       container_name: sveltekit_frontend
       command: sh -c "npx svelte-kit sync && npm run dev"
       volumes:
         - ./frontend:/app
-        - /app/node_modules # 一個小技巧：防止本地的 node_modules 覆蓋容器中已安裝的
+        - /app/node_modules # 防止本地的 node_modules 覆蓋容器中已安裝的
       ports:
         - "5173:5173"
       depends_on:

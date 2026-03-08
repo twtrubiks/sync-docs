@@ -59,7 +59,7 @@ Subsequent development was implemented using Claude Code
   * **Framework**: [Django](https://github.com/twtrubiks/django-tutorial) with [Django Ninja](https://github.com/twtrubiks/django_ninja_tutorial) for building REST APIs
   * **Real-time Communication**: [Django Channels](https://github.com/twtrubiks/django-chat-room) for handling WebSockets
   * **Database**: PostgreSQL (default in Docker environment)
-  * **Async Server**: Uvicorn/Daphne
+  * **ASGI Server**: Daphne (production, supports HTTP + WebSocket)
   * **Dependencies**:
       * `django`
       * `django-ninja`
@@ -115,9 +115,20 @@ cp frontend/.env.example frontend/.env
 
 ### Quick Start (Using Docker, Recommended)
 
+This project uses Docker Compose's [override mechanism](https://docs.docker.com/compose/how-tos/multiple-compose-files/merge/) to separate development and production environments:
+
+- `docker-compose.yml` — Base config (backend uses Daphne ASGI server)
+- `docker-compose.override.yml` — Development overrides (backend switches to runserver + volume mount for hot reload)
+
 ```bash
+# Development (automatically loads override, uses runserver with hot reload)
 docker compose up --build
+
+# Production (base config only, uses Daphne)
+docker compose -f docker-compose.yml up -d
 ```
+
+> **Note**: Production deployment requires a `.env` file with `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD`, `DJANGO_ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS` and other required variables.
 
 **Docker Environment Variables:**
 * Root `.env` → Read by Docker Compose → Injected into backend container
@@ -258,7 +269,7 @@ As an **educational demonstration project**, this project provides comprehensive
 This project is an MVP (Minimum Viable Product) with plenty of room for improvement. Here are some potential future features:
 
   * **Folder Organization**: Implement a folder system for better document management.
-  * **Deployment**: Create a production-ready deployment setup using Docker, Gunicorn, and Nginx.
+  * **Deployment**: Add Nginx reverse proxy alongside the existing Daphne ASGI server for a more complete production setup.
   * **Comprehensive Testing**: Add more unit and end-to-end tests to ensure stability.
 
 ## Donation

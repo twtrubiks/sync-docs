@@ -1,0 +1,21 @@
+# 開發環境覆蓋配置
+# docker compose up 時會自動載入此檔案
+# 生產部署時使用: docker compose -f docker-compose.yml up
+
+services:
+
+    backend:
+      # 開發環境使用 runserver（支援自動重載）
+      command: bash -c "python manage.py runserver 0.0.0.0:8000"
+      volumes:
+        - ./backend:/sync-docs
+      environment:
+        - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:-django-insecure-dev-only-key}
+        - DJANGO_DEBUG=True
+        - DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS:-*}
+        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password123}
+        - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+
+    django-postgres:
+      environment:
+        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password123}

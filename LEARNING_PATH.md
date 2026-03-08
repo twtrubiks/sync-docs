@@ -327,7 +327,12 @@ Document.objects.filter(owner=user)
 
 ### 學習內容
 
-- **Docker 容器化**：閱讀 `docker-compose.yml`、`backend/Dockerfile`
+- **Docker 容器化**：閱讀 `docker-compose.yml`、`docker-compose.override.yml`、`backend/Dockerfile`
+- **開發/生產環境分離**：
+  - `docker-compose.yml`：生產基礎配置，使用 Daphne ASGI 伺服器
+  - `docker-compose.override.yml`：開發覆蓋配置，使用 runserver（支援熱重載）
+  - `docker compose up` 自動載入 override（開發模式）
+  - `docker compose -f docker-compose.yml up` 僅用基礎配置（生產模式）
 - **環境變數管理**：閱讀 `backend/backend/settings.py`
 - **效能優化**：N+1 查詢問題、快取策略
 
