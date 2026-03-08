@@ -163,7 +163,11 @@ Document.objects.filter(owner=user)
 
 **3.2 認證流程**
 - 閱讀檔案：`frontend/src/lib/auth.ts`
-- 關鍵概念：localStorage Token、HTTP 攔截器、自動添加認證標頭
+- 關鍵概念：
+  - localStorage 存儲 Access Token 與 Refresh Token
+  - HTTP 攔截器：自動添加認證標頭
+  - 401 自動刷新：`apiFetch` 遇到 401 時用 Refresh Token 換取新 Access Token 並重試
+  - `refreshPromise` 鎖防止多個請求同時觸發刷新
 
 **3.3 Quill 編輯器整合**
 - 閱讀檔案：`frontend/src/lib/components/QuillEditor.svelte`
@@ -232,6 +236,15 @@ Document.objects.filter(owner=user)
     - Subprotocol 比 Query Parameter 更安全（Token 不會出現在 URL 和伺服器日誌中）
   - 前端連接方式：`new WebSocket(url, ['access_token.<JWT>'])`
   - Middleware 模式：`JWTAuthMiddleware` 解析 subprotocol 並驗證 token
+  - TOKEN_EXPIRED 處理：前端收到 4002 關閉碼時，先嘗試用 Refresh Token 換新 Access Token 再重連，而非直接登出
+
+**4.7 WebSocket 自動重連機制**
+- 閱讀檔案：`frontend/src/routes/(protected)/docs/[document_id]/+page.svelte` 的 `connectWebSocket`、`getReconnectDelay` 方法
+- 關鍵概念：
+  - 指數退避 + 隨機抖動（Exponential Backoff + Jitter）避免伺服器雪崩
+  - 正常關閉（1000/1001）和永久性錯誤（4001-4008）不重連
+  - 暫時性錯誤自動重連，最多 5 次
+  - 重連前清理舊 socket 防止連線洩漏
 
 **4.4 Delta 同步邏輯**
 - 閱讀：`backend/docs_app/consumers.py` 的 `receive` 和 `doc_update` 方法
@@ -260,6 +273,8 @@ Document.objects.filter(owner=user)
 - [ ] 能解釋 Delta 同步中如何避免無限循環
 - [ ] 理解 cursor_move 為什麼不發回給發送者
 - [ ] 能解釋 TTL 刷新機制的作用
+- [ ] 能解釋為什麼重連需要指數退避 + 隨機抖動（防止伺服器雪崩）
+- [ ] 理解 TOKEN_EXPIRED 時的自動刷新重連流程
 
 ---
 
