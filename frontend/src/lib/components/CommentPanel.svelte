@@ -10,6 +10,7 @@
 	} from '$lib/api/comments';
 	import { toast } from '@zerodevx/svelte-toast';
 	import { X, MessageSquare, Send, Edit3, Trash2, MessageCircle } from 'lucide-svelte';
+	import ConfirmDialog from './ConfirmDialog.svelte';
 
 	interface Props {
 		documentId: string;
@@ -118,9 +119,18 @@
 	}
 
 	// ========== 刪除評論 ==========
-	async function handleDelete(commentId: string) {
-		const confirmed = confirm('確定要刪除這則評論嗎？');
-		if (!confirmed) return;
+	let showDeleteConfirm = $state(false);
+	let pendingDeleteCommentId = $state<string | null>(null);
+
+	function handleDelete(commentId: string) {
+		pendingDeleteCommentId = commentId;
+		showDeleteConfirm = true;
+	}
+
+	async function confirmDeleteComment() {
+		if (!pendingDeleteCommentId) return;
+		const commentId = pendingDeleteCommentId;
+		pendingDeleteCommentId = null;
 
 		try {
 			await deleteComment(documentId, commentId);
@@ -367,3 +377,13 @@
 		</div>
 	</div>
 {/if}
+
+<ConfirmDialog
+	bind:isOpen={showDeleteConfirm}
+	title="刪除評論"
+	message="確定要刪除這則評論嗎？"
+	confirmText="刪除"
+	variant="danger"
+	onConfirm={confirmDeleteComment}
+	onCancel={() => { pendingDeleteCommentId = null; }}
+/>

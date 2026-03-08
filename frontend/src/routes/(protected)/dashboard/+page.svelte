@@ -4,6 +4,7 @@
 	import { post, del } from '$lib/auth';
 	import { getDocuments, type Document } from '$lib/api/documents';
 	import { Plus, FileText, Trash2, User as UserIcon, Eye, Pencil } from 'lucide-svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	// Svelte 5 Runes: use $state() for reactive state
 	let documents = $state<Document[]>([]);
@@ -40,13 +41,21 @@
 		}
 	}
 
-	async function deleteDocument(documentId: string) {
-		if (!confirm('Are you sure you want to delete this document?')) {
-			return;
-		}
+	let showDeleteConfirm = $state(false);
+	let pendingDeleteDocId = $state<string | null>(null);
+
+	function deleteDocument(documentId: string) {
+		pendingDeleteDocId = documentId;
+		showDeleteConfirm = true;
+	}
+
+	async function confirmDeleteDocument() {
+		if (!pendingDeleteDocId) return;
+		const docId = pendingDeleteDocId;
+		pendingDeleteDocId = null;
+
 		try {
-			await del(`/documents/${documentId}/`);
-			// 重新取得當前頁（如果當前頁只剩一筆且不是第一頁，回到上一頁）
+			await del(`/documents/${docId}/`);
 			const targetPage = documents.length === 1 && currentPage > 1 ? currentPage - 1 : currentPage;
 			await fetchDocuments(targetPage);
 		} catch (error) {
@@ -180,3 +189,13 @@
 		{/if}
 	</div>
 </div>
+
+<ConfirmDialog
+	bind:isOpen={showDeleteConfirm}
+	title="刪除文件"
+	message="確定要刪除這份文件嗎？此操作無法復原。"
+	confirmText="刪除"
+	variant="danger"
+	onConfirm={confirmDeleteDocument}
+	onCancel={() => { pendingDeleteDocId = null; }}
+/>

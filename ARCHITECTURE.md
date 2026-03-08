@@ -364,6 +364,7 @@ frontend/src/
     ├── components/            # 可複用組件
     │   ├── QuillEditor.svelte # Quill 編輯器
     │   ├── AIDialog.svelte    # AI 寫作助手對話框
+    │   ├── ConfirmDialog.svelte # 統一確認對話框（取代原生 confirm）
     │   ├── VersionHistoryPanel.svelte  # 版本歷史面板
     │   └── CommentPanel.svelte # 評論面板
     └── types/                 # TypeScript 類型定義

@@ -6,6 +6,7 @@
 	import VersionHistoryPanel from '$lib/components/VersionHistoryPanel.svelte';
 	import AIDialog from '$lib/components/AIDialog.svelte';
 	import CommentPanel from '$lib/components/CommentPanel.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { get, put, del, post, logout, refreshAccessToken, type Collaborator } from '$lib/auth';
 	import { toast } from '@zerodevx/svelte-toast';
 	import type { QuillDelta, QuillType } from '$lib/types/quill';
@@ -515,13 +516,16 @@
 		lastSendTime = Date.now();
 	}
 
-	async function handleDelete() {
-		if (!confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
-			return;
-		}
+	let showDeleteConfirm = $state(false);
+
+	function handleDelete() {
+		showDeleteConfirm = true;
+	}
+
+	async function confirmDelete() {
 		try {
 			await del(`/documents/${documentId}/`);
-			toast.push('Document deleted successfully.', {
+			toast.push('文件已成功刪除', {
 				theme: {
 					'--toastBackground': '#48BB78',
 					'--toastColor': 'white',
@@ -531,7 +535,7 @@
 			await goto('/dashboard');
 		} catch (error) {
 			console.error('Failed to delete document:', error);
-			toast.push('Failed to delete document.', {
+			toast.push('刪除文件失敗', {
 				theme: {
 					'--toastBackground': '#F56565',
 					'--toastColor': 'white',
@@ -936,6 +940,15 @@
 	bind:isOpen={showAIDialog}
 	selectedText={selectedTextForAI}
 	onApply={applyAIResult}
+/>
+
+<ConfirmDialog
+	bind:isOpen={showDeleteConfirm}
+	title="刪除文件"
+	message="確定要刪除這份文件嗎？此操作無法復原。"
+	confirmText="刪除"
+	variant="danger"
+	onConfirm={confirmDelete}
 />
 
 <!-- 評論面板 -->

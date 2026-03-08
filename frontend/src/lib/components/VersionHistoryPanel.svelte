@@ -8,6 +8,7 @@
 	} from '$lib/api/versions';
 	import { toast } from '@zerodevx/svelte-toast';
 	import { X, RotateCcw, Clock, User } from 'lucide-svelte';
+	import ConfirmDialog from './ConfirmDialog.svelte';
 
 	interface Props {
 		documentId: string;
@@ -77,13 +78,15 @@
 	}
 
 	// 還原版本
-	async function handleRestore() {
-		if (!selectedVersion || restoring) return;
+	let showRestoreConfirm = $state(false);
 
-		const confirmed = confirm(
-			`確定要還原到版本 ${selectedVersion.version_number}？\n這將覆蓋目前的內容。`
-		);
-		if (!confirmed) return;
+	function handleRestore() {
+		if (!selectedVersion || restoring) return;
+		showRestoreConfirm = true;
+	}
+
+	async function confirmRestore() {
+		if (!selectedVersion || restoring) return;
 
 		restoring = true;
 		try {
@@ -239,3 +242,12 @@
 		{/if}
 	</div>
 {/if}
+
+<ConfirmDialog
+	bind:isOpen={showRestoreConfirm}
+	title="還原版本"
+	message={selectedVersion ? `確定要還原到版本 ${selectedVersion.version_number}？這將覆蓋目前的內容。` : ''}
+	confirmText="還原"
+	variant="warning"
+	onConfirm={confirmRestore}
+/>
