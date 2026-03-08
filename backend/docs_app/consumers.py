@@ -9,7 +9,6 @@ import json
 import logging
 import time
 
-import redis.asyncio as redis
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.conf import settings
@@ -19,6 +18,7 @@ from .schemas import WebSocketMessageSchema, CursorMoveMessage
 from .auth_middleware import AuthErrorType
 from .connection_manager import connection_manager
 from .rate_limiter import rate_limiter
+from .redis_pool import get_async_redis
 
 # 獲取日誌記錄器
 logger = logging.getLogger('docs_app')
@@ -29,9 +29,6 @@ MAX_OPS_COUNT = getattr(settings, 'WEBSOCKET_MAX_OPS_COUNT', 1000)
 
 # 心跳間隔（秒）- 用於刷新連接 TTL
 HEARTBEAT_INTERVAL = getattr(settings, 'WEBSOCKET_HEARTBEAT_INTERVAL', 120)  # 2 分鐘
-
-# Presence Redis 連接池
-_presence_redis_pool = None
 
 # Lua 腳本：原子性添加用戶到在線列表
 ADD_USER_SCRIPT = """
@@ -55,18 +52,6 @@ local user_id = ARGV[1]
 redis.call('HDEL', key, user_id)
 return 1
 """
-
-
-async def get_presence_redis():
-    """獲取 Presence Redis 連接（懶加載）"""
-    global _presence_redis_pool
-    if _presence_redis_pool is None:
-        _presence_redis_pool = redis.Redis(
-            host=getattr(settings, 'REDIS_HOST', 'django-redis'),
-            port=int(getattr(settings, 'REDIS_PORT', 6379)),
-            decode_responses=True
-        )
-    return _presence_redis_pool
 
 
 # WebSocket Close Codes (Application-specific: 4000-4999)
@@ -633,7 +618,7 @@ class DocConsumer(AsyncWebsocketConsumer):
     async def add_user_to_presence(self):
         """將用戶加入 Redis 在線列表（使用 Lua 腳本確保原子性）"""
         try:
-            r = await get_presence_redis()
+            r = await get_async_redis()
             key = f"presence:{self.document_id}"
             user_data = json.dumps({
                 'user_id': str(self.user.id),
@@ -650,7 +635,7 @@ class DocConsumer(AsyncWebsocketConsumer):
     async def remove_user_from_presence(self):
         """將用戶從 Redis 在線列表移除"""
         try:
-            r = await get_presence_redis()
+            r = await get_async_redis()
             key = f"presence:{self.document_id}"
             await r.eval(REMOVE_USER_SCRIPT, 1, key, str(self.user.id))
         except Exception as e:
@@ -660,7 +645,7 @@ class DocConsumer(AsyncWebsocketConsumer):
     async def refresh_presence_ttl(self):
         """刷新用戶在 presence 列表中的 TTL，確保活躍用戶不會消失"""
         try:
-            r = await get_presence_redis()
+            r = await get_async_redis()
             key = f"presence:{self.document_id}"
             await r.expire(key, 300)  # 刷新 5 分鐘
         except Exception as e:
@@ -670,7 +655,7 @@ class DocConsumer(AsyncWebsocketConsumer):
     async def get_online_users(self):
         """獲取當前在線用戶列表"""
         try:
-            r = await get_presence_redis()
+            r = await get_async_redis()
             key = f"presence:{self.document_id}"
             users = await r.hgetall(key)
             return [json.loads(v) for v in users.values()]

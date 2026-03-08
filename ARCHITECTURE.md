@@ -331,6 +331,7 @@ backend/
     ├── ai_api.py              # AI API（摘要、潤稿）
     ├── comment_api.py         # 評論 API
     ├── ai_service.py          # AI 服務層（Gemini 整合）
+    ├── redis_pool.py          # 統一 Redis 連接池管理
     ├── ai_rate_limiter.py     # AI 速率限制
     ├── consumers.py           # WebSocket 消費者
     ├── schemas.py             # Pydantic Schema
@@ -1012,6 +1013,9 @@ class Meta:
 - 特別是大量文件時效果顯著
 
 ### 5. Redis 使用策略
+
+**統一連接池（`redis_pool.py`）：**
+所有需要 Redis 連線的模組（`consumers.py`、`connection_manager.py`、`rate_limiter.py`、`ai_rate_limiter.py`）統一透過 `redis_pool.py` 取得共用連線，避免各自建立獨立的連線池。提供 `get_async_redis()`（async 場景）和 `get_sync_redis()`（sync 場景）兩個入口。
 
 **Channel Layer（WebSocket 廣播）：**
 ```python

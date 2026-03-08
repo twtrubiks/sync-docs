@@ -5,8 +5,7 @@ AI API 速率限制器
 
 import time
 import logging
-import redis
-from django.conf import settings
+from .redis_pool import get_sync_redis
 
 logger = logging.getLogger('docs_app')
 
@@ -18,20 +17,9 @@ class AIRateLimiter:
     使用 Redis Sorted Set 追蹤請求時間戳
     """
 
-    def __init__(self):
-        self.redis_host = getattr(settings, 'REDIS_HOST', 'django-redis')
-        self.redis_port = int(getattr(settings, 'REDIS_PORT', 6379))
-        self._redis = None
-
     def _get_redis(self):
-        """獲取 Redis 連接（懶加載）"""
-        if self._redis is None:
-            self._redis = redis.Redis(
-                host=self.redis_host,
-                port=self.redis_port,
-                decode_responses=True
-            )
-        return self._redis
+        """獲取 Redis 連接（委託給統一連接池）"""
+        return get_sync_redis()
 
     def is_allowed(
         self, key: str, max_requests: int, window_seconds: int

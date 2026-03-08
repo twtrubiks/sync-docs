@@ -6,8 +6,8 @@ WebSocket 連接管理器
 import asyncio
 import logging
 
-import redis.asyncio as redis
 from django.conf import settings
+from .redis_pool import get_async_redis
 
 logger = logging.getLogger('docs_app')
 
@@ -30,22 +30,13 @@ class ConnectionManager:
     REMOVE_MAX_RETRIES = 3
 
     def __init__(self):
-        self.redis_host = getattr(settings, 'REDIS_HOST', 'django-redis')
-        self.redis_port = int(getattr(settings, 'REDIS_PORT', 6379))
         self.max_connections = getattr(
             settings, 'WEBSOCKET_MAX_CONNECTIONS_PER_USER', 5
         )
-        self._redis = None
 
     async def get_redis(self):
-        """獲取 Redis 連接（懶加載）"""
-        if self._redis is None:
-            self._redis = redis.Redis(
-                host=self.redis_host,
-                port=self.redis_port,
-                decode_responses=True
-            )
-        return self._redis
+        """獲取 Redis 連接（委託給統一連接池）"""
+        return await get_async_redis()
 
     def _get_key(self, user_id: int) -> str:
         """生成用戶連接追蹤的 Redis key"""

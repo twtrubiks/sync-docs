@@ -5,8 +5,8 @@ WebSocket 速率限制器
 
 import time
 import logging
-import redis.asyncio as redis
 from django.conf import settings
+from .redis_pool import get_async_redis
 from typing import Tuple, Dict, Any
 
 logger = logging.getLogger('docs_app')
@@ -28,25 +28,16 @@ class RateLimiter:
     """
 
     def __init__(self):
-        self.redis_host = getattr(settings, 'REDIS_HOST', 'django-redis')
-        self.redis_port = int(getattr(settings, 'REDIS_PORT', 6379))
         self.max_messages = getattr(
             settings, 'WEBSOCKET_RATE_LIMIT_MESSAGES', 30
         )
         self.window_seconds = getattr(
             settings, 'WEBSOCKET_RATE_LIMIT_WINDOW', 10
         )
-        self._redis = None
 
     async def get_redis(self):
-        """獲取 Redis 連接（懶加載）"""
-        if self._redis is None:
-            self._redis = redis.Redis(
-                host=self.redis_host,
-                port=self.redis_port,
-                decode_responses=True
-            )
-        return self._redis
+        """獲取 Redis 連接（委託給統一連接池）"""
+        return await get_async_redis()
 
     def _get_key(self, user_id: int, document_id: str) -> str:
         """生成速率限制的 Redis key"""
