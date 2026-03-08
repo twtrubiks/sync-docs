@@ -123,12 +123,12 @@ def test_user_registration_with_duplicate_username(client, user_data):
     assert response1.status_code == 200
 
     # 2. 嘗試用相同用戶名再次註冊
-    with pytest.raises(Exception):  # ValidationError會導致異常
-        client.post(
-            "/api/auth/register",
-            data=json.dumps(user_data),
-            content_type="application/json"
-        )
+    response2 = client.post(
+        "/api/auth/register",
+        data=json.dumps(user_data),
+        content_type="application/json"
+    )
+    assert response2.status_code == 400
 
     # 確保只有一個用戶被創建
     assert User.objects.count() == 1
@@ -144,12 +144,12 @@ def test_user_registration_with_weak_password(client):
         "password": "123"  # 太短的密碼
     }
 
-    with pytest.raises(Exception):  # ValidationError會導致異常
-        client.post(
-            "/api/auth/register",
-            data=json.dumps(weak_password_data),
-            content_type="application/json"
-        )
+    response = client.post(
+        "/api/auth/register",
+        data=json.dumps(weak_password_data),
+        content_type="application/json"
+    )
+    assert response.status_code == 400
 
     # 確保用戶沒有被創建
     assert User.objects.count() == 0
@@ -165,17 +165,18 @@ def test_user_registration_with_common_password(client):
         "password": "password123"  # 常見密碼
     }
 
-    try:
-        response = client.post(
-            "/api/auth/register",
-            data=json.dumps(common_password_data),
-            content_type="application/json"
-        )
-        # 如果沒有拋出異常，則註冊成功
-        assert response.status_code == 200
+    response = client.post(
+        "/api/auth/register",
+        data=json.dumps(common_password_data),
+        content_type="application/json"
+    )
+
+    if response.status_code == 200:
+        # 密碼驗證通過，註冊成功
         assert User.objects.count() == 1
-    except Exception:
-        # 如果拋出異常，則密碼驗證失敗
+    else:
+        # 密碼驗證失敗（常見密碼被拒絕）
+        assert response.status_code == 400
         assert User.objects.count() == 0
 
 

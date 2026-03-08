@@ -10,6 +10,7 @@ from ninja_jwt.controller import NinjaJWTDefaultController
 from ninja_jwt.authentication import JWTAuth
 from django.core.exceptions import ValidationError
 from django.contrib.auth.password_validation import validate_password
+from ninja.errors import HttpError
 from .schemas import UserSchema, RegisterSchema
 
 # 獲取日誌記錄器
@@ -64,11 +65,10 @@ class AuthController(NinjaJWTDefaultController):
             return user
 
         except ValidationError as e:
-            logger.warning(f"用戶註冊驗證失敗: {str(e)}")
-            raise
-        except Exception as e:
-            logger.error(f"用戶註冊時發生錯誤: {str(e)}")
-            raise
+            messages = e.messages if hasattr(e, 'messages') else [str(e)]
+            error_msg = "; ".join(messages)
+            logger.warning(f"用戶註冊驗證失敗: {error_msg}")
+            raise HttpError(400, error_msg)
 
     @http_post("/logout", auth=JWTAuth())
     def logout(self, request):
