@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 from datetime import timedelta
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -21,20 +23,27 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-# TODO: 正式環境請設定安全的 DJANGO_SECRET_KEY
-SECRET_KEY = os.environ.get(
-    'DJANGO_SECRET_KEY',
-    'django-insecure-5#f#=%9ype@jky*cizeegw8kc94+4v1_-%^-r7dfy*ds^-txuu'
-)
-
 # SECURITY WARNING: don't run with debug turned on in production!
-# TODO: 正式環境請設定 DJANGO_DEBUG=False
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
 
-# 在生產環境中應該設置具體的主機名
-# TODO: 正式環境請設定 DJANGO_ALLOWED_HOSTS 為具體域名
-ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', '*').split(',')
+# SECURITY WARNING: keep the secret key used in production secret!
+if DEBUG:
+    SECRET_KEY = os.environ.get(
+        'DJANGO_SECRET_KEY',
+        'django-insecure-5#f#=%9ype@jky*cizeegw8kc94+4v1_-%^-r7dfy*ds^-txuu'
+    )
+else:
+    SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
+    if not SECRET_KEY:
+        raise ImproperlyConfigured("生產環境必須設定 DJANGO_SECRET_KEY 環境變數")
+
+# ALLOWED_HOSTS: 開發環境允許所有主機，生產環境強制設定
+if DEBUG:
+    ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', '*').split(',')
+else:
+    ALLOWED_HOSTS = [h.strip() for h in os.environ.get('DJANGO_ALLOWED_HOSTS', '').split(',') if h.strip()]
+    if not ALLOWED_HOSTS:
+        raise ImproperlyConfigured("生產環境必須設定 DJANGO_ALLOWED_HOSTS 環境變數")
 
 
 # Application definition
