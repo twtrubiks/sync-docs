@@ -92,12 +92,12 @@ class CommentController:
         user = self.context.request.auth
         document = self._get_document_with_permission_check(document_id, user)
 
-        # 只取頂層評論（非回覆），使用 select_related 避免 N+1
+        # 只取頂層評論（非回覆），使用 annotate 計算 reply_count 避免 N+1
         # 按建立時間降序排列（最新的在前面）
-        comments = Comment.objects.filter(
+        comments = Comment.objects.with_reply_count().filter(
             document=document,
             parent__isnull=True
-        ).select_related('author').prefetch_related('replies').order_by('-created_at')
+        ).select_related('author').order_by('-created_at')
 
         page_obj, page_size = paginate_queryset(comments, page, page_size)
 
@@ -115,7 +115,7 @@ class CommentController:
                 created_at=comment.created_at,
                 updated_at=comment.updated_at,
                 parent_id=comment.parent_id,
-                reply_count=comment.reply_count,
+                reply_count=comment.annotated_reply_count,
                 is_author=is_author,
                 can_delete=(is_author or is_doc_owner)
             ))
@@ -215,7 +215,9 @@ class CommentController:
         user = self.context.request.auth
         document = self._get_document_with_permission_check(document_id, user)
 
-        comment = get_object_or_404(Comment, id=comment_id, document=document)
+        comment = get_object_or_404(
+            Comment.objects.with_reply_count(), id=comment_id, document=document
+        )
 
         # 檢查是否為作者
         if comment.author != user:
@@ -241,7 +243,7 @@ class CommentController:
             created_at=comment.created_at,
             updated_at=comment.updated_at,
             parent_id=comment.parent_id,
-            reply_count=comment.reply_count,
+            reply_count=comment.annotated_reply_count,
             is_author=True,
             can_delete=True  # 編輯者就是作者，一定可以刪除
         )

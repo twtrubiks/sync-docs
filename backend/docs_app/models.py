@@ -284,6 +284,14 @@ class DocumentVersion(models.Model):
         ).delete()
 
 
+class CommentQuerySet(models.QuerySet):
+    """Comment 自定義 QuerySet"""
+
+    def with_reply_count(self):
+        """使用 annotate 計算回覆數量，避免 N+1 查詢"""
+        return self.annotate(annotated_reply_count=models.Count('replies'))
+
+
 class Comment(models.Model):
     """
     文件評論模型
@@ -343,6 +351,8 @@ class Comment(models.Model):
         auto_now=True,
         help_text="更新時間"
     )
+
+    objects = CommentQuerySet.as_manager()
 
     class Meta:
         verbose_name = "評論"

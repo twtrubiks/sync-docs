@@ -7,6 +7,8 @@ import uuid
 
 import pytest
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
+from django.db import connection
 from ninja_jwt.tokens import AccessToken
 from pydantic import ValidationError
 
@@ -121,6 +123,40 @@ class TestCommentModel:
         # 刷新 parent 以獲取最新的 reply_count
         parent.refresh_from_db()
         assert parent.reply_count == 2
+
+    def test_with_reply_count_queryset(self, test_user, test_document):
+        """測試 with_reply_count() 自定義 QuerySet 方法"""
+        parent1 = Comment.objects.create(
+            document=test_document, author=test_user, content="Parent 1"
+        )
+        parent2 = Comment.objects.create(
+            document=test_document, author=test_user, content="Parent 2"
+        )
+        # parent1 有 3 個回覆, parent2 有 1 個回覆
+        for i in range(3):
+            Comment.objects.create(
+                document=test_document, author=test_user,
+                content=f"Reply {i}", parent=parent1
+            )
+        Comment.objects.create(
+            document=test_document, author=test_user,
+            content="Reply", parent=parent2
+        )
+
+        comments = Comment.objects.with_reply_count().filter(
+            parent__isnull=True
+        ).order_by('created_at')
+
+        assert comments[0].annotated_reply_count == 3
+        assert comments[1].annotated_reply_count == 1
+
+    def test_with_reply_count_no_replies(self, test_user, test_document):
+        """測試 with_reply_count() 在沒有回覆時返回 0"""
+        Comment.objects.create(
+            document=test_document, author=test_user, content="No replies"
+        )
+        comment = Comment.objects.with_reply_count().first()
+        assert comment.annotated_reply_count == 0
 
 
 # ========== Phase 2: Schema 測試 ==========
@@ -263,6 +299,48 @@ class TestCommentAPI:
         data = response.json()
         assert data["total"] == 1
         assert data["comments"][0]["content"] == "My own comment"
+
+    def test_list_comments_reply_count_uses_annotate(self, authenticated_client, test_document):
+        """測試 list_comments 使用 annotate 計算 reply_count，避免 N+1"""
+        client, user, token = authenticated_client
+
+        # 建立 3 個頂層評論，各有不同數量的回覆
+        for i in range(3):
+            parent = Comment.objects.create(
+                document=test_document, author=user, content=f"Comment {i}"
+            )
+            for j in range(i + 1):  # 分別有 1, 2, 3 個回覆
+                Comment.objects.create(
+                    document=test_document, author=user,
+                    content=f"Reply {j}", parent=parent
+                )
+
+        # 記錄查詢數量，確認不會隨評論數增加
+        with CaptureQueriesContext(connection) as ctx:
+            response = client.get(
+                f"/api/documents/{test_document.id}/comments/",
+                HTTP_AUTHORIZATION=f"Bearer {token}"
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 3
+
+        # 驗證 reply_count 正確（最新的在前面）
+        comments = data["comments"]
+        assert comments[0]["reply_count"] == 3
+        assert comments[1]["reply_count"] == 2
+        assert comments[2]["reply_count"] == 1
+
+        # 確認沒有 N+1：不應該有 per-comment 的 reply count 查詢
+        # 過濾出 comment 相關的查詢（排除 auth/permission 查詢）
+        comment_queries = [
+            q['sql'] for q in ctx.captured_queries
+            if 'docs_app_comment' in q['sql']
+        ]
+        # 應該只有 1 條 comment 查詢（帶 COUNT annotate 的主查詢）
+        # 而不是 1 + N 條（主查詢 + 每個 comment 的 reply count）
+        assert len(comment_queries) <= 2  # 主查詢 + 可能的 count 查詢
 
     def test_list_comments_ordered_by_newest_first(self, authenticated_client, test_document):
         """測試評論列表按最新排序（降序）"""
