@@ -12,29 +12,29 @@ Subsequent development was implemented using Claude Code
 
 ## Screenshots
 
-![Document Editor Main Screen](https://cdn.imgpile.com/f/wqSGcM2_xl.png)
+![Document Editor Main Screen](./screenshots/dashboard.png)
 
-*Real-time Updates*
+Real-time Updates
 
-![Real-time Updates](https://cdn.imgpile.com/f/eoPjnL3_xl.png)
+![Real-time Updates](./screenshots/sync.png)
 
-*Document Sharing*
+Document Sharing
 
-![Document Sharing](https://cdn.imgpile.com/f/qVOuhaq_xl.png)
+![Document Sharing](./screenshots/share.png)
 
-*Presence Indicators and Cursor Position Display*
+Presence Indicators and Cursor Position Display
 
-![Presence Indicators and Cursor Position](https://cdn.imgpile.com/f/K4fNF6Z_xl.png)
+![Presence Indicators and Cursor Position](./screenshots/presence-cursor.png)
 
-*Text Summarization and Polishing*
+AI Writing Assistant
 
-![Text Summarization and Polishing](https://cdn.imgpile.com/f/GNLbY3N_xl.png)
+![AI Writing Assistant](./screenshots/ai-writing-assistant.png)
 
-*Version History*
+Version History
 
 ![Version History Panel](./screenshots/version-history.png)
 
-*Comment System*
+Comment System
 
 ![Comment Panel](./screenshots/comment-panel.png)
 
