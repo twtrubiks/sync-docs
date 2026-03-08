@@ -132,8 +132,18 @@ async function apiFetch(url: string, options: RequestInit = {}, _isRetry = false
 		let errorMessage = `API request failed: ${response.statusText}`;
 		try {
 			const errorData = await response.json();
-			// HttpError 使用 "detail"，其他格式可能用 "message"
-			errorMessage = errorData.detail || errorData.message || errorMessage;
+			const detail = errorData.detail;
+			if (typeof detail === 'string') {
+				errorMessage = detail;
+			} else if (Array.isArray(detail) && detail.length > 0 && typeof detail[0]?.msg === 'string') {
+				// Django Ninja 驗證錯誤格式: [{type, loc, msg, ctx}]
+				errorMessage = detail
+					.filter((e: { msg?: unknown }) => typeof e?.msg === 'string')
+					.map((e: { msg: string }) => e.msg)
+					.join('; ');
+			} else if (typeof errorData.message === 'string') {
+				errorMessage = errorData.message;
+			}
 		} catch {
 			// 無法解析 JSON，使用預設訊息
 		}

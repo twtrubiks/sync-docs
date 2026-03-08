@@ -20,7 +20,9 @@
 		Trash2,
 		X,
 		Plus,
-		UserMinus
+		UserMinus,
+		AlertTriangle,
+		RefreshCw
 	} from 'lucide-svelte';
 
 	// WebSocket Close Codes（與後端對應）
@@ -67,6 +69,10 @@
 	let saveStatus: 'idle' | 'unsaved' | 'saving' | 'saved' | 'error' | 'connecting' =
 		$state('connecting');
 	let debounceTimeout: ReturnType<typeof setTimeout> | undefined = $state(undefined);
+
+	// Document loading state
+	let isLoading = $state(true);
+	let loadError: string | null = $state(null);
 
 	// Throttle state for WebSocket delta sending
 	let pendingDelta: QuillDelta | null = $state(null);
@@ -205,6 +211,7 @@
 
 	// Svelte 5 Runes: $derived.by() replaces $: for complex derivations
 	const statusText = $derived.by(() => {
+		if (loadError) return 'Failed to load document';
 		switch (saveStatus) {
 			case 'connecting':
 				return 'Connecting...';
@@ -443,7 +450,11 @@
 		};
 	}
 
-	onMount(async () => {
+	async function loadDocument() {
+		clearTimeout(reconnectTimer); // Prevent stale auto-reconnect from firing
+		isLoading = true;
+		loadError = null;
+		saveStatus = 'connecting';
 		try {
 			const doc = await get(`/documents/${documentId}/`);
 			title = doc.title;
@@ -457,8 +468,17 @@
 			connectWebSocket();
 		} catch (error) {
 			console.error('Failed to fetch document:', error);
+			const message = error instanceof Error ? error.message : 'Failed to load document.';
+			loadError = message;
 			saveStatus = 'error';
+			toast.push(message, { theme: errorTheme });
+		} finally {
+			isLoading = false;
 		}
+	}
+
+	onMount(() => {
+		loadDocument();
 	});
 
 	const debouncedSave = () => {
@@ -696,79 +716,103 @@
 				<div class="doc-status">{statusText}</div>
 			</div>
 		</div>
-		<div class="header-right">
-			<!-- 在線用戶頭像 -->
-			<div class="online-users">
-				{#each [...onlineUsers.entries()] as [userId, user]}
-					{#if userId !== currentUserId}
-						<div
-							class="user-avatar"
-							style="background-color: {user.color}"
-							title={user.username}
-						>
-							{user.username.charAt(0).toUpperCase()}
-						</div>
-					{/if}
-				{/each}
+		{#if !isLoading && !loadError}
+			<div class="header-right">
+				<!-- 在線用戶頭像 -->
+				<div class="online-users">
+					{#each [...onlineUsers.entries()] as [userId, user]}
+						{#if userId !== currentUserId}
+							<div
+								class="user-avatar"
+								style="background-color: {user.color}"
+								title={user.username}
+							>
+								{user.username.charAt(0).toUpperCase()}
+							</div>
+						{/if}
+					{/each}
+				</div>
+				<!-- 評論按鈕 -->
+				<button
+					type="button"
+					class="toolbar-button"
+					onclick={() => (showCommentPanel = true)}
+					title="評論"
+					aria-label="評論"
+				>
+					<MessageSquare size={20} />
+				</button>
+				<!-- AI 按鈕 -->
+				<button
+					type="button"
+					class="toolbar-button ai"
+					onclick={openAIDialog}
+					title="AI Writing Assistant"
+					aria-label="AI Writing Assistant"
+					disabled={!canWrite}
+				>
+					<Sparkles size={20} />
+				</button>
+				<!-- 版本歷史按鈕 -->
+				<button
+					type="button"
+					class="toolbar-button"
+					onclick={() => (showVersionHistory = true)}
+					title="版本歷史"
+					aria-label="版本歷史"
+				>
+					<Clock size={20} />
+				</button>
+				{#if isOwner}
+					<button onclick={() => (showShareModal = true)} class="share-button" title="Share">
+						<Share2 size={18} />
+						<span class="hidden sm:inline">Share</span>
+					</button>
+				{/if}
+				{#if isOwner}
+					<button onclick={handleDelete} class="delete-button" title="Delete">
+						<Trash2 size={18} />
+						<span class="hidden sm:inline">Delete</span>
+					</button>
+				{/if}
 			</div>
-			<!-- 評論按鈕 -->
-			<button
-				type="button"
-				class="toolbar-button"
-				onclick={() => (showCommentPanel = true)}
-				title="評論"
-				aria-label="評論"
-			>
-				<MessageSquare size={20} />
-			</button>
-			<!-- AI 按鈕 -->
-			<button
-				type="button"
-				class="toolbar-button ai"
-				onclick={openAIDialog}
-				title="AI Writing Assistant"
-				aria-label="AI Writing Assistant"
-				disabled={!canWrite}
-			>
-				<Sparkles size={20} />
-			</button>
-			<!-- 版本歷史按鈕 -->
-			<button
-				type="button"
-				class="toolbar-button"
-				onclick={() => (showVersionHistory = true)}
-				title="版本歷史"
-				aria-label="版本歷史"
-			>
-				<Clock size={20} />
-			</button>
-			{#if isOwner}
-				<button onclick={() => (showShareModal = true)} class="share-button" title="Share">
-					<Share2 size={18} />
-					<span class="hidden sm:inline">Share</span>
-				</button>
-			{/if}
-			{#if isOwner}
-				<button onclick={handleDelete} class="delete-button" title="Delete">
-					<Trash2 size={18} />
-					<span class="hidden sm:inline">Delete</span>
-				</button>
-			{/if}
-		</div>
+		{/if}
 	</header>
 
 	<main class="main-content">
-		<div class="editor-wrapper">
-			<!-- Svelte 5: Use onTextChange callback prop instead of on:text-change event -->
-			<QuillEditor
-				bind:this={quillEditor}
-				bind:value={content}
-				bind:editor
-				onTextChange={handleContentChange}
-				onSelectionChange={handleSelectionChange}
-				disabled={!canWrite}
-			/>
-		</div>
+		{#if isLoading}
+			<div class="load-state" data-testid="loading-state">
+				<div class="loading-spinner"></div>
+				<p class="load-state-text">Loading document...</p>
+			</div>
+		{:else if loadError}
+			<div class="load-state" data-testid="error-state">
+				<div class="load-state-icon">
+					<AlertTriangle size={48} />
+				</div>
+				<h2 class="load-state-title">Failed to load document</h2>
+				<p class="load-state-text">{loadError}</p>
+				<div class="load-state-actions">
+					<button onclick={loadDocument} class="retry-button">
+						<RefreshCw size={16} />
+						<span>Retry</span>
+					</button>
+					<a href="/dashboard" class="back-link">Back to Dashboard</a>
+				</div>
+			</div>
+		{:else}
+			<div class="editor-wrapper">
+				<!-- Svelte 5: Use onTextChange callback prop instead of on:text-change event -->
+				<QuillEditor
+					bind:this={quillEditor}
+					bind:value={content}
+					bind:editor
+					onTextChange={handleContentChange}
+					onSelectionChange={handleSelectionChange}
+					disabled={!canWrite}
+				/>
+			</div>
+		{/if}
 	</main>
 </div>
 
@@ -1496,5 +1540,87 @@
 	.user-avatar:hover {
 		transform: scale(1.1);
 		z-index: 1;
+	}
+
+	/* Document loading & error states */
+	.load-state {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 1rem;
+		padding: 4rem 2rem;
+		text-align: center;
+	}
+
+	.loading-spinner {
+		width: 2.5rem;
+		height: 2.5rem;
+		border: 3px solid var(--color-primary-200);
+		border-top-color: var(--color-primary-600);
+		border-radius: 50%;
+		animation: spin 0.8s linear infinite;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	.load-state-icon {
+		color: var(--color-danger);
+	}
+
+	.load-state-title {
+		font-size: 1.25rem;
+		font-weight: 600;
+		color: var(--color-primary-900);
+		margin: 0;
+	}
+
+	.load-state-text {
+		font-size: 0.875rem;
+		color: var(--color-primary-500);
+		margin: 0;
+		max-width: 24rem;
+	}
+
+	.load-state-actions {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		margin-top: 0.5rem;
+	}
+
+	.retry-button {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+		padding: 0.5rem 1.25rem;
+		background-color: var(--color-primary-600);
+		color: white;
+		font-weight: 500;
+		border-radius: 0.5rem;
+		border: none;
+		cursor: pointer;
+		transition: background-color 0.15s ease;
+	}
+
+	.retry-button:hover {
+		background-color: var(--color-primary-700);
+	}
+
+	.back-link {
+		padding: 0.5rem 1.25rem;
+		color: var(--color-primary-600);
+		font-weight: 500;
+		border-radius: 0.5rem;
+		text-decoration: none;
+		transition: background-color 0.15s ease;
+	}
+
+	.back-link:hover {
+		background-color: var(--color-primary-100);
 	}
 </style>
