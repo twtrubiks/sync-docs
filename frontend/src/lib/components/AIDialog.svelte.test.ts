@@ -9,8 +9,10 @@ vi.mock('$lib/ai', () => ({
 }));
 
 // Mock toast
-vi.mock('@zerodevx/svelte-toast', () => ({
-	toast: { push: vi.fn() }
+vi.mock('$lib/toast', () => ({
+	toastSuccess: vi.fn(),
+	toastError: vi.fn(),
+	toastWarning: vi.fn()
 }));
 
 // Mock $app/environment
@@ -19,7 +21,7 @@ vi.mock('$app/environment', () => ({
 }));
 
 import { processWithAI } from '$lib/ai';
-import { toast } from '@zerodevx/svelte-toast';
+import { toastError, toastWarning } from '$lib/toast';
 
 describe('AIDialog', () => {
 	beforeEach(() => {
@@ -141,7 +143,7 @@ describe('AIDialog', () => {
 		await fireEvent.click(screen.getByText('Summarize'));
 
 		await waitFor(() => {
-			expect(toast.push).toHaveBeenCalledWith('Test error', expect.any(Object));
+			expect(toastError).toHaveBeenCalledWith('Test error');
 		});
 	});
 
@@ -161,10 +163,7 @@ describe('AIDialog', () => {
 		await fireEvent.click(screen.getByText('Summarize'));
 
 		await waitFor(() => {
-			expect(toast.push).toHaveBeenCalledWith(
-				'Request timed out, please try again',
-				expect.any(Object)
-			);
+			expect(toastError).toHaveBeenCalledWith('Request timed out, please try again');
 		});
 	});
 

@@ -34,8 +34,10 @@ vi.mock('$lib/auth', () => ({
 }));
 
 // Mock toast
-vi.mock('@zerodevx/svelte-toast', () => ({
-	toast: { push: vi.fn() }
+vi.mock('$lib/toast', () => ({
+	toastSuccess: vi.fn(),
+	toastError: vi.fn(),
+	toastWarning: vi.fn()
 }));
 
 // Mock quill-delta
@@ -78,7 +80,7 @@ vi.mock('$lib/components/CommentPanel.svelte', () => ({
 // Import after mocks
 import Page from './+page.svelte';
 import { get } from '$lib/auth';
-import { toast } from '@zerodevx/svelte-toast';
+import { toastError } from '$lib/toast';
 
 // Mock document data
 const mockDoc = {
@@ -157,7 +159,7 @@ describe('Document Page - Load States', () => {
 		render(Page);
 
 		await waitFor(() => {
-			expect(toast.push).toHaveBeenCalledWith('Network error', expect.any(Object));
+			expect(toastError).toHaveBeenCalledWith('Network error');
 		});
 	});
 

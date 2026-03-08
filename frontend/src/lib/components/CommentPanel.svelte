@@ -8,7 +8,7 @@
 		type Comment,
 		type CommentCreatePayload
 	} from '$lib/api/comments';
-	import { toast } from '@zerodevx/svelte-toast';
+	import { toastSuccess, toastError } from '$lib/toast';
 	import { X, MessageSquare, Send, Edit3, Trash2, MessageCircle } from 'lucide-svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 
@@ -46,7 +46,7 @@
 			currentPage = result.page;
 			totalPages = result.total_pages;
 		} catch (error) {
-			toast.push('載入評論失敗', { theme: { '--toastBackground': '#ef4444' } });
+			toastError('載入評論失敗');
 			console.error('Failed to load comments:', error);
 		} finally {
 			loading = false;
@@ -64,7 +64,7 @@
 			currentPage = result.page;
 			totalPages = result.total_pages;
 		} catch (error) {
-			toast.push('載入更多評論失敗', { theme: { '--toastBackground': '#ef4444' } });
+			toastError('載入更多評論失敗');
 			console.error('Failed to load more comments:', error);
 		} finally {
 			loadingMore = false;
@@ -84,9 +84,9 @@
 				comments = [newComment, ...comments];
 			}
 			newCommentContent = '';
-			toast.push('評論已發送', { theme: { '--toastBackground': '#22c55e' } });
+			toastSuccess('評論已發送');
 		} catch (error) {
-			toast.push('發送評論失敗', { theme: { '--toastBackground': '#ef4444' } });
+			toastError('發送評論失敗');
 			console.error('Failed to create comment:', error);
 		} finally {
 			submitting = false;
@@ -111,9 +111,9 @@
 			const updated = await updateComment(documentId, commentId, { content: editContent.trim() });
 			comments = comments.map((c) => (c.id === commentId ? updated : c));
 			cancelEdit();
-			toast.push('評論已更新', { theme: { '--toastBackground': '#22c55e' } });
+			toastSuccess('評論已更新');
 		} catch (error) {
-			toast.push('更新評論失敗', { theme: { '--toastBackground': '#ef4444' } });
+			toastError('更新評論失敗');
 			console.error('Failed to update comment:', error);
 		}
 	}
@@ -135,9 +135,9 @@
 		try {
 			await deleteComment(documentId, commentId);
 			comments = comments.filter((c) => c.id !== commentId);
-			toast.push('評論已刪除', { theme: { '--toastBackground': '#22c55e' } });
+			toastSuccess('評論已刪除');
 		} catch (error) {
-			toast.push('刪除評論失敗', { theme: { '--toastBackground': '#ef4444' } });
+			toastError('刪除評論失敗');
 			console.error('Failed to delete comment:', error);
 		}
 	}

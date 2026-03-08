@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { token, refreshToken, fetchCurrentUser } from '$lib/auth';
 	import { goto } from '$app/navigation';
-	import { toast } from '@zerodevx/svelte-toast';
+	import { toastError } from '$lib/toast';
 	import { LogIn, User, Lock } from 'lucide-svelte';
 
 	// Svelte 5 Runes: use $state() for reactive state
@@ -29,13 +29,7 @@
 			} else {
 				// Handle error
 				console.error('Login failed');
-				toast.push('Login failed. Please check your credentials.', {
-					theme: {
-						'--toastBackground': '#ef4444',
-						'--toastColor': 'white',
-						'--toastBarBackground': '#dc2626'
-					}
-				});
+				toastError('Login failed. Please check your credentials.');
 			}
 		} finally {
 			isLoading = false;

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { processWithAI } from '$lib/ai';
-	import { toast } from '@zerodevx/svelte-toast';
+	import { toastError, toastWarning } from '$lib/toast';
 	import { X, Sparkles, FileText, Wand2, Check } from 'lucide-svelte';
 
 	let {
@@ -19,7 +19,7 @@
 
 	async function handleAction(action: 'summarize' | 'polish') {
 		if (!selectedText.trim()) {
-			toast.push('Please select text first', { theme: { '--toastBackground': '#f59e0b' } });
+			toastWarning('Please select text first');
 			return;
 		}
 
@@ -33,18 +33,14 @@
 			if (response.success) {
 				result = response.result;
 			} else {
-				toast.push(response.error || 'AI processing failed', {
-					theme: { '--toastBackground': '#ef4444' }
-				});
+				toastError(response.error || 'AI processing failed');
 			}
 		} catch (error: unknown) {
 			// Handle timeout and other errors
 			if (error instanceof Error && error.name === 'AbortError') {
-				toast.push('Request timed out, please try again', {
-					theme: { '--toastBackground': '#ef4444' }
-				});
+				toastError('Request timed out, please try again');
 			} else {
-				toast.push('AI processing request failed', { theme: { '--toastBackground': '#ef4444' } });
+				toastError('AI processing request failed');
 			}
 		} finally {
 			loading = false;

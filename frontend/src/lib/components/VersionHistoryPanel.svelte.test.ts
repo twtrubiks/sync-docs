@@ -11,8 +11,10 @@ vi.mock('$lib/api/versions', () => ({
 }));
 
 // Mock toast
-vi.mock('@zerodevx/svelte-toast', () => ({
-	toast: { push: vi.fn() }
+vi.mock('$lib/toast', () => ({
+	toastSuccess: vi.fn(),
+	toastError: vi.fn(),
+	toastWarning: vi.fn()
 }));
 
 // Mock $app/environment

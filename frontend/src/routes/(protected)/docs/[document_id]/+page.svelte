@@ -8,7 +8,7 @@
 	import CommentPanel from '$lib/components/CommentPanel.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { get, put, del, post, logout, refreshAccessToken, type Collaborator } from '$lib/auth';
-	import { toast } from '@zerodevx/svelte-toast';
+	import { toastSuccess, toastError, toastWarning } from '$lib/toast';
 	import type { QuillDelta, QuillType } from '$lib/types/quill';
 	import type { PresenceUser } from '$lib/types/cursor';
 	import Delta from 'quill-delta';
@@ -37,25 +37,6 @@
 		MESSAGE_TOO_LARGE: 4007,
 		RATE_LIMITED: 4008
 	} as const;
-
-	// Toast 主題
-	const errorTheme = {
-		'--toastBackground': '#F56565',
-		'--toastColor': 'white',
-		'--toastBarBackground': '#C53030'
-	};
-
-	const warningTheme = {
-		'--toastBackground': '#ED8936',
-		'--toastColor': 'white',
-		'--toastBarBackground': '#C05621'
-	};
-
-	const successTheme = {
-		'--toastBackground': '#48BB78',
-		'--toastColor': 'white',
-		'--toastBarBackground': '#2F855A'
-	};
 
 	// Svelte 5: $page store auto-subscription still works
 	const documentId = $page.params.document_id;
@@ -128,13 +109,7 @@
 			collaborators = await get(`/documents/${documentId}/collaborators/`);
 		} catch (error) {
 			console.error('Failed to fetch collaborators:', error);
-			toast.push('Could not load collaborators.', {
-				theme: {
-					'--toastBackground': '#F56565',
-					'--toastColor': 'white',
-					'--toastBarBackground': '#C53030'
-				}
-			});
+			toastError('Could not load collaborators.');
 		}
 	}
 
@@ -148,23 +123,11 @@
 			collaborators = [...collaborators, newCollaborator];
 			newCollaboratorUsername = ''; // Clear input
 			newCollaboratorPermission = 'write'; // Reset to default
-			toast.push(`Successfully added ${newCollaborator.username} as a collaborator.`, {
-				theme: {
-					'--toastBackground': '#48BB78',
-					'--toastColor': 'white',
-					'--toastBarBackground': '#2F855A'
-				}
-			});
+			toastSuccess(`Successfully added ${newCollaborator.username} as a collaborator.`);
 		} catch (error: unknown) {
 			console.error('Failed to add collaborator:', error);
 			const message = error instanceof Error ? error.message : 'Failed to add collaborator.';
-			toast.push(message, {
-				theme: {
-					'--toastBackground': '#F56565',
-					'--toastColor': 'white',
-					'--toastBarBackground': '#C53030'
-				}
-			});
+			toastError(message);
 		}
 	}
 
@@ -178,23 +141,11 @@
 
 		try {
 			await del(`/documents/${documentId}/collaborators/${collaboratorToRemove.id}/`);
-			toast.push('Collaborator removed.', {
-				theme: {
-					'--toastBackground': '#48BB78',
-					'--toastColor': 'white',
-					'--toastBarBackground': '#2F855A'
-				}
-			});
+			toastSuccess('Collaborator removed.');
 			collaborators = collaborators.filter((c) => c.id !== collaboratorToRemove!.id);
 		} catch (error) {
 			console.error('Failed to remove collaborator:', error);
-			toast.push('Failed to remove collaborator.', {
-				theme: {
-					'--toastBackground': '#F56565',
-					'--toastColor': 'white',
-					'--toastBarBackground': '#C53030'
-				}
-			});
+			toastError('Failed to remove collaborator.');
 		} finally {
 			// Hide and reset
 			showRemoveConfirmModal = false;
@@ -243,39 +194,37 @@
 				const refreshed = await refreshAccessToken();
 				if (refreshed) {
 					console.log('Token refreshed, reconnecting WebSocket...');
-					toast.push('Session refreshed.', { theme: successTheme });
+					toastSuccess('Session refreshed.');
 					connectWebSocket();
 					return;
 				}
 				// Refresh 也失敗，登出
-				toast.push('Session expired. Please login again.', { theme: errorTheme });
+				toastError('Session expired. Please login again.');
 				logout();
 				goto('/login');
 				break;
 			}
 			case WS_CLOSE_CODES.AUTH_FAILED:
-				toast.push('Session expired. Please login again.', { theme: errorTheme });
+				toastError('Session expired. Please login again.');
 				logout();
 				goto('/login');
 				break;
 			case WS_CLOSE_CODES.PERMISSION_DENIED:
-				toast.push(message || 'You do not have permission to access this document.', {
-					theme: errorTheme
-				});
+				toastError(message || 'You do not have permission to access this document.');
 				goto('/dashboard');
 				break;
 			case WS_CLOSE_CODES.DOCUMENT_NOT_FOUND:
-				toast.push('Document not found.', { theme: errorTheme });
+				toastError('Document not found.');
 				goto('/dashboard');
 				break;
 			case WS_CLOSE_CODES.TOO_MANY_CONNECTIONS:
-				toast.push('Too many open tabs. Please close some and refresh.', { theme: errorTheme });
+				toastError('Too many open tabs. Please close some and refresh.');
 				break;
 			case WS_CLOSE_CODES.RATE_LIMITED:
-				toast.push('Sending too fast. Please slow down.', { theme: warningTheme });
+				toastWarning('Sending too fast. Please slow down.');
 				break;
 			default:
-				toast.push(message || 'Connection lost. Please refresh the page.', { theme: errorTheme });
+				toastError(message || 'Connection lost. Please refresh the page.');
 		}
 	}
 
@@ -313,7 +262,7 @@
 		socket.onopen = () => {
 			console.log('WebSocket connection established');
 			if (reconnectAttempts > 0) {
-				toast.push('Connection restored.', { theme: successTheme });
+				toastSuccess('Connection restored.');
 			}
 			reconnectAttempts = 0;
 			saveStatus = 'idle';
@@ -384,15 +333,11 @@
 				case 'error':
 					// 運行時錯誤（如 RATE_LIMITED, READ_ONLY）- 連接保持
 					if (data.error_code === 'RATE_LIMITED' && data.retry_after) {
-						toast.push(`Too fast! Wait ${Math.ceil(data.retry_after)}s`, {
-							theme: warningTheme
-						});
+						toastWarning(`Too fast! Wait ${Math.ceil(data.retry_after)}s`);
 					} else if (data.error_code === 'READ_ONLY') {
-						toast.push('You have read-only access to this document.', {
-							theme: warningTheme
-						});
+						toastWarning('You have read-only access to this document.');
 					} else {
-						toast.push(data.message || 'An error occurred.', { theme: errorTheme });
+						toastError(data.message || 'An error occurred.');
 					}
 					break;
 				// Comment events
@@ -442,7 +387,7 @@
 				}, delay);
 			} else {
 				saveStatus = 'error';
-				toast.push('Connection lost. Please refresh the page.', { theme: errorTheme });
+				toastError('Connection lost. Please refresh the page.');
 			}
 		};
 
@@ -472,7 +417,7 @@
 			const message = error instanceof Error ? error.message : 'Failed to load document.';
 			loadError = message;
 			saveStatus = 'error';
-			toast.push(message, { theme: errorTheme });
+			toastError(message);
 		} finally {
 			isLoading = false;
 		}
@@ -495,13 +440,7 @@
 			} catch (error) {
 				console.error('Failed to save document:', error);
 				saveStatus = 'error';
-				toast.push('Failed to save document.', {
-					theme: {
-						'--toastBackground': '#F56565',
-						'--toastColor': 'white',
-						'--toastBarBackground': '#C53030'
-					}
-				});
+				toastError('Failed to save document.');
 			}
 		}, 1500);
 	};
@@ -525,23 +464,11 @@
 	async function confirmDelete() {
 		try {
 			await del(`/documents/${documentId}/`);
-			toast.push('文件已成功刪除', {
-				theme: {
-					'--toastBackground': '#48BB78',
-					'--toastColor': 'white',
-					'--toastBarBackground': '#2F855A'
-				}
-			});
+			toastSuccess('文件已成功刪除');
 			await goto('/dashboard');
 		} catch (error) {
 			console.error('Failed to delete document:', error);
-			toast.push('刪除文件失敗', {
-				theme: {
-					'--toastBackground': '#F56565',
-					'--toastColor': 'white',
-					'--toastBarBackground': '#C53030'
-				}
-			});
+			toastError('刪除文件失敗');
 		}
 	}
 
@@ -609,7 +536,7 @@
 
 		const selection = editor.getSelection();
 		if (!selection || selection.length === 0) {
-			toast.push('Please select text first', { theme: warningTheme });
+			toastWarning('Please select text first');
 			return;
 		}
 
@@ -627,7 +554,7 @@
 		// Conflict detection: check if original text was modified by others
 		const currentText = editor.getText(savedSelection.index, savedSelection.length);
 		if (currentText !== savedOriginalText) {
-			toast.push('Text was modified. Please reselect.', { theme: warningTheme });
+			toastWarning('Text was modified. Please reselect.');
 			savedSelection = null;
 			savedOriginalText = '';
 			return;
@@ -665,9 +592,7 @@
 			}, 2000);
 		} catch (error) {
 			console.error('Failed to reload document after restore:', error);
-			toast.push('Failed to reload document.', {
-				theme: errorTheme
-			});
+			toastError('Failed to reload document.');
 		}
 	}
 

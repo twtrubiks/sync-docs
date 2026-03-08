@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { toast } from '@zerodevx/svelte-toast';
+	import { toastSuccess, toastError } from '$lib/toast';
 	import { UserPlus, User, Mail, Lock, ShieldCheck } from 'lucide-svelte';
 
 	// Svelte 5 Runes: use $state() for reactive state
@@ -12,13 +12,7 @@
 
 	async function handleSubmit() {
 		if (password !== confirmPassword) {
-			toast.push('Passwords do not match', {
-				theme: {
-					'--toastBackground': '#ef4444',
-					'--toastColor': 'white',
-					'--toastBarBackground': '#dc2626'
-				}
-			});
+			toastError('Passwords do not match');
 			return;
 		}
 
@@ -37,13 +31,7 @@
 			});
 
 			if (response.ok) {
-				toast.push('Registration successful! Please log in.', {
-					theme: {
-						'--toastBackground': '#10b981',
-						'--toastColor': 'white',
-						'--toastBarBackground': '#059669'
-					}
-				});
+				toastSuccess('Registration successful! Please log in.');
 				goto('/login');
 			} else {
 				// Handle error
@@ -52,13 +40,7 @@
 					.catch(() => ({ detail: 'An unknown error occurred.' }));
 				console.error('Registration failed:', errorData);
 				const message = errorData.detail || JSON.stringify(errorData);
-				toast.push(`Registration failed: ${message}`, {
-					theme: {
-						'--toastBackground': '#ef4444',
-						'--toastColor': 'white',
-						'--toastBarBackground': '#dc2626'
-					}
-				});
+				toastError(`Registration failed: ${message}`);
 			}
 		} finally {
 			isLoading = false;

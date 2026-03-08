@@ -6,7 +6,7 @@
 		restoreVersion,
 		type DocumentVersion
 	} from '$lib/api/versions';
-	import { toast } from '@zerodevx/svelte-toast';
+	import { toastSuccess, toastError } from '$lib/toast';
 	import { X, RotateCcw, Clock, User } from 'lucide-svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 
@@ -40,7 +40,7 @@
 			totalPages = result.total_pages;
 			currentPage = result.page;
 		} catch (error) {
-			toast.push('載入版本失敗', { theme: { '--toastBackground': '#ef4444' } });
+			toastError('載入版本失敗');
 			console.error('Failed to load versions:', error);
 		} finally {
 			loading = false;
@@ -58,7 +58,7 @@
 			currentPage = result.page;
 			totalPages = result.total_pages;
 		} catch (error) {
-			toast.push('載入更多版本失敗', { theme: { '--toastBackground': '#ef4444' } });
+			toastError('載入更多版本失敗');
 			console.error('Failed to load more versions:', error);
 		} finally {
 			loadingMore = false;
@@ -72,7 +72,7 @@
 			const detail = await getVersionDetail(documentId, version.id);
 			previewContent = detail.content;
 		} catch (error) {
-			toast.push('載入版本內容失敗', { theme: { '--toastBackground': '#ef4444' } });
+			toastError('載入版本內容失敗');
 			console.error('Failed to load version detail:', error);
 		}
 	}
@@ -91,11 +91,11 @@
 		restoring = true;
 		try {
 			const result = await restoreVersion(documentId, selectedVersion.id);
-			toast.push(result.message, { theme: { '--toastBackground': '#22c55e' } });
+			toastSuccess(result.message);
 			isOpen = false;
 			onRestore();
 		} catch (error) {
-			toast.push('還原失敗', { theme: { '--toastBackground': '#ef4444' } });
+			toastError('還原失敗');
 			console.error('Failed to restore version:', error);
 		} finally {
 			restoring = false;
