@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import {
 		getComments,
+		getReplies,
 		createComment,
 		updateComment,
 		deleteComment,
@@ -9,7 +10,7 @@
 		type CommentCreatePayload
 	} from '$lib/api/comments';
 	import { toastSuccess, toastError } from '$lib/toast';
-	import { X, MessageSquare, Send, PenLine, Trash2, MessageCircle } from '@lucide/svelte';
+	import { X, MessageSquare, Send, PenLine, Trash2, MessageCircle, ChevronDown, ChevronUp } from '@lucide/svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 
 	interface Props {
@@ -31,7 +32,13 @@
 	let editContent = $state('');
 	let currentPage = $state(1);
 	let totalPages = $state(1);
+	let totalComments = $state(0);
 	let hasMore = $derived(currentPage < totalPages);
+
+	// ========== 回覆相關狀態 ==========
+	let expandedReplies = $state<Record<string, Comment[]>>({});
+	let loadingReplies = $state<Record<string, boolean>>({});
+	let knownReplyIds = $state<Set<string>>(new Set());
 
 	// ========== 載入評論（第一頁） ==========
 	async function loadComments() {
@@ -44,6 +51,7 @@
 			comments = result.comments;
 			currentPage = result.page;
 			totalPages = result.total_pages;
+			totalComments = result.total;
 		} catch (error) {
 			toastError('載入評論失敗');
 			console.error('Failed to load comments:', error);
@@ -62,6 +70,7 @@
 			comments = [...comments, ...result.comments];
 			currentPage = result.page;
 			totalPages = result.total_pages;
+			totalComments = result.total;
 		} catch (error) {
 			toastError('載入更多評論失敗');
 			console.error('Failed to load more comments:', error);
@@ -81,6 +90,7 @@
 			// 檢查是否已存在（WebSocket 可能已先收到廣播）
 			if (!comments.find((c) => c.id === newComment.id)) {
 				comments = [newComment, ...comments];
+				totalComments++;
 			}
 			newCommentContent = '';
 			toastSuccess('評論已發送');
@@ -91,6 +101,30 @@
 			submitting = false;
 		}
 	}
+
+	// ========== 展開/收合回覆 ==========
+	async function toggleReplies(commentId: string) {
+		if (expandedReplies[commentId]) {
+			// 已展開 → 收合
+			const { [commentId]: _, ...rest } = expandedReplies;
+			expandedReplies = rest;
+			return;
+		}
+
+		loadingReplies = { ...loadingReplies, [commentId]: true };
+		try {
+			const replies = await getReplies(documentId, commentId);
+			// 標記 is_author / can_delete（API 已回傳）
+			expandedReplies = { ...expandedReplies, [commentId]: replies };
+		} catch (error) {
+			toastError('載入回覆失敗');
+			console.error('Failed to load replies:', error);
+		} finally {
+			const { [commentId]: _, ...rest } = loadingReplies;
+			loadingReplies = rest;
+		}
+	}
+
 
 	// ========== 編輯評論 ==========
 	function startEdit(comment: Comment) {
@@ -134,6 +168,7 @@
 		try {
 			await deleteComment(documentId, commentId);
 			comments = comments.filter((c) => c.id !== commentId);
+			totalComments--;
 			toastSuccess('評論已刪除');
 		} catch (error) {
 			toastError('刪除評論失敗');
@@ -156,13 +191,8 @@
 	}
 
 	export function addCommentFromWS(wsComment: WSComment) {
-		// 檢查是否已存在（避免重複）
-		if (comments.find((c) => c.id === wsComment.id)) return;
-
 		// 根據當前用戶計算權限（字串比較）
 		const isAuthor = wsComment.author_id === currentUserId;
-
-		// 從 WSComment 提取需要的欄位，排除 author_id（Comment 介面沒有這個欄位）
 		const { author_id: _, ...rest } = wsComment;
 		const comment: Comment = {
 			...rest,
@@ -170,7 +200,32 @@
 			can_delete: isAuthor || isOwner
 		};
 
-		comments = [comment, ...comments];
+		if (wsComment.parent_id) {
+			// 去重：如果是自己剛提交的回覆，跳過（submitReply 已處理）
+			if (knownReplyIds.has(wsComment.id)) {
+				knownReplyIds = new Set([...knownReplyIds].filter((id) => id !== wsComment.id));
+				return;
+			}
+
+			// 其他人的回覆：更新 reply_count 並加入已展開的回覆列表
+			comments = comments.map((c) =>
+				c.id === wsComment.parent_id ? { ...c, reply_count: c.reply_count + 1 } : c
+			);
+			if (expandedReplies[wsComment.parent_id]) {
+				const existing = expandedReplies[wsComment.parent_id];
+				if (!existing.find((r) => r.id === wsComment.id)) {
+					expandedReplies = {
+						...expandedReplies,
+						[wsComment.parent_id]: [...existing, comment]
+					};
+				}
+			}
+		} else {
+			// 頂層評論
+			if (comments.find((c) => c.id === wsComment.id)) return;
+			comments = [comment, ...comments];
+			totalComments++;
+		}
 	}
 
 	export function updateCommentFromWS(commentId: string, content: string, updated_at: string) {
@@ -179,6 +234,7 @@
 
 	export function removeCommentFromWS(commentId: string) {
 		comments = comments.filter((c) => c.id !== commentId);
+		totalComments--;
 	}
 
 	// ========== 格式化時間 ==========
@@ -223,7 +279,9 @@
 		<div class="border-primary-200 flex items-center justify-between border-b p-4">
 			<div class="flex items-center gap-2">
 				<MessageSquare size={20} class="text-primary-500" />
-				<h2 class="text-primary-900 text-lg font-semibold">評論</h2>
+				<h2 class="text-primary-900 text-lg font-semibold">
+					評論{totalComments > 0 ? ` (${totalComments})` : ''}
+				</h2>
 			</div>
 			<button
 				type="button"
@@ -340,12 +398,38 @@
 									</div>
 								{/if}
 
-								<!-- 回覆數量 -->
+								<!-- 回覆數量（可展開） -->
 								{#if comment.reply_count > 0}
-									<div class="text-primary-500 mt-2 flex items-center gap-1 text-xs">
+									<button
+										type="button"
+										class="text-primary-600 hover:text-primary-800 mt-3 flex cursor-pointer items-center gap-1 text-xs font-medium transition-colors"
+										onclick={() => toggleReplies(comment.id)}
+									>
+										{#if loadingReplies[comment.id]}
+											<span class="border-primary-300 border-t-primary-600 h-3 w-3 animate-spin rounded-full border-2"></span>
+										{:else if expandedReplies[comment.id]}
+											<ChevronUp size={14} />
+										{:else}
+											<ChevronDown size={14} />
+										{/if}
 										<MessageCircle size={12} />
 										{comment.reply_count} 則回覆
-									</div>
+									</button>
+
+									<!-- 展開的回覆列表 -->
+									{#if expandedReplies[comment.id]}
+										<div class="border-primary-200 mt-2 space-y-2 border-l-2 pl-3">
+											{#each expandedReplies[comment.id] as reply (reply.id)}
+												<div class="rounded-lg bg-primary-50/50 p-2.5">
+													<div class="flex items-center justify-between">
+														<span class="text-primary-800 text-xs font-medium">{reply.author_username}</span>
+														<span class="text-primary-400 text-xs">{formatTime(reply.created_at)}</span>
+													</div>
+													<p class="text-primary-700 mt-1 text-sm whitespace-pre-wrap">{reply.content}</p>
+												</div>
+											{/each}
+										</div>
+									{/if}
 								{/if}
 							{/if}
 						</div>
