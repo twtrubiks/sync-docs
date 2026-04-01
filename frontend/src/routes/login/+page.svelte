@@ -2,7 +2,7 @@
 	import { token, refreshToken, fetchCurrentUser } from '$lib/auth';
 	import { goto } from '$app/navigation';
 	import { toastError } from '$lib/toast';
-	import { LogIn, User, Lock } from 'lucide-svelte';
+	import { LogIn, User, Lock } from '@lucide/svelte';
 
 	// Svelte 5 Runes: use $state() for reactive state
 	let username = $state('');
@@ -44,21 +44,21 @@
 </script>
 
 <div class="mx-auto mt-8 max-w-md">
-	<div class="rounded-2xl border border-primary-200 bg-white p-8 shadow-xl">
+	<div class="border-primary-200 rounded-2xl border bg-white p-8 shadow-xl">
 		<div class="mb-8 text-center">
 			<div
-				class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary-100"
+				class="bg-primary-100 mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full"
 			>
 				<LogIn size={32} class="text-primary-600" />
 			</div>
-			<h1 class="text-2xl font-bold text-primary-900">Welcome Back</h1>
-			<p class="mt-2 text-primary-600">Sign in to continue to SyncDocs</p>
+			<h1 class="text-primary-900 text-2xl font-bold">Welcome Back</h1>
+			<p class="text-primary-600 mt-2">Sign in to continue to SyncDocs</p>
 		</div>
 
 		<!-- Svelte 5: onsubmit instead of on:submit|preventDefault -->
 		<form onsubmit={handleFormSubmit} class="space-y-5">
 			<div>
-				<label for="username" class="mb-2 block text-sm font-medium text-primary-800">
+				<label for="username" class="text-primary-800 mb-2 block text-sm font-medium">
 					Username
 				</label>
 				<div class="relative">
@@ -71,12 +71,12 @@
 						bind:value={username}
 						required
 						placeholder="Enter your username"
-						class="w-full cursor-text rounded-lg border border-primary-300 py-3 pr-4 pl-10 transition-all duration-150 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none"
+						class="border-primary-300 focus:border-primary-500 focus:ring-primary-500/20 w-full cursor-text rounded-lg border py-3 pr-4 pl-10 transition-all duration-150 focus:ring-2 focus:outline-none"
 					/>
 				</div>
 			</div>
 			<div>
-				<label for="password" class="mb-2 block text-sm font-medium text-primary-800">
+				<label for="password" class="text-primary-800 mb-2 block text-sm font-medium">
 					Password
 				</label>
 				<div class="relative">
@@ -89,14 +89,14 @@
 						bind:value={password}
 						required
 						placeholder="Enter your password"
-						class="w-full cursor-text rounded-lg border border-primary-300 py-3 pr-4 pl-10 transition-all duration-150 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none"
+						class="border-primary-300 focus:border-primary-500 focus:ring-primary-500/20 w-full cursor-text rounded-lg border py-3 pr-4 pl-10 transition-all duration-150 focus:ring-2 focus:outline-none"
 					/>
 				</div>
 			</div>
 			<button
 				type="submit"
 				disabled={isLoading}
-				class="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-3 font-semibold text-white transition-all duration-150 hover:bg-primary-700 focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+				class="bg-primary-600 hover:bg-primary-700 focus:ring-primary-500 flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg px-4 py-3 font-semibold text-white transition-all duration-150 focus:ring-2 focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
 			>
 				{#if isLoading}
 					<span class="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent"
@@ -109,11 +109,11 @@
 			</button>
 		</form>
 
-		<p class="mt-6 text-center text-sm text-primary-600">
+		<p class="text-primary-600 mt-6 text-center text-sm">
 			Don't have an account?
 			<a
 				href="/register"
-				class="cursor-pointer font-medium text-cta-500 transition-colors hover:text-cta-600"
+				class="text-cta-500 hover:text-cta-600 cursor-pointer font-medium transition-colors"
 			>
 				Create one
 			</a>

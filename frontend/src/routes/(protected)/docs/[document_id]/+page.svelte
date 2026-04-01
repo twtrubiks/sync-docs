@@ -22,9 +22,9 @@
 		X,
 		Plus,
 		UserMinus,
-		AlertTriangle,
+		TriangleAlert,
 		RefreshCw
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 
 	// WebSocket Close Codes（與後端對應）
 	const WS_CLOSE_CODES = {
@@ -651,11 +651,7 @@
 				<div class="online-users">
 					{#each [...onlineUsers.entries()] as [userId, user]}
 						{#if userId !== currentUserId}
-							<div
-								class="user-avatar"
-								style="background-color: {user.color}"
-								title={user.username}
-							>
+							<div class="user-avatar" style="background-color: {user.color}" title={user.username}>
 								{user.username.charAt(0).toUpperCase()}
 							</div>
 						{/if}
@@ -717,7 +713,7 @@
 		{:else if loadError}
 			<div class="load-state" data-testid="error-state">
 				<div class="load-state-icon">
-					<AlertTriangle size={48} />
+					<TriangleAlert size={48} />
 				</div>
 				<h2 class="load-state-title">Failed to load document</h2>
 				<p class="load-state-text">{loadError}</p>
@@ -855,17 +851,13 @@
 
 <!-- 版本歷史面板 -->
 <VersionHistoryPanel
-	documentId={documentId}
+	{documentId}
 	bind:isOpen={showVersionHistory}
 	onRestore={handleVersionRestore}
 />
 
 <!-- AI 對話框 -->
-<AIDialog
-	bind:isOpen={showAIDialog}
-	selectedText={selectedTextForAI}
-	onApply={applyAIResult}
-/>
+<AIDialog bind:isOpen={showAIDialog} selectedText={selectedTextForAI} onApply={applyAIResult} />
 
 <ConfirmDialog
 	bind:isOpen={showDeleteConfirm}
@@ -1159,8 +1151,7 @@
 	.modal-content {
 		background-color: white;
 		border-radius: 1rem;
-		box-shadow:
-			0 25px 50px -12px rgba(0, 0, 0, 0.25);
+		box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
 		padding: 1.5rem;
 		width: 100%;
 		max-width: 28rem;

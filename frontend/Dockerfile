@@ -6,8 +6,8 @@ WORKDIR /app
 # 複製 package.json 和 lock 檔
 COPY package*.json ./
 
-# 安裝依賴
-RUN npm install
+# 安裝依賴（使用 ci 確保完全依照 lock file 安裝）
+RUN npm ci
 
 # 複製專案的其餘程式碼
 # 同樣地，這行主要是為了建檔，開發時會被 volume 覆蓋

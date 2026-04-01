@@ -9,7 +9,7 @@
 		type CommentCreatePayload
 	} from '$lib/api/comments';
 	import { toastSuccess, toastError } from '$lib/toast';
-	import { X, MessageSquare, Send, Edit3, Trash2, MessageCircle } from 'lucide-svelte';
+	import { X, MessageSquare, Send, PenLine, Trash2, MessageCircle } from '@lucide/svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 
 	interface Props {
@@ -20,8 +20,7 @@
 		isOwner: boolean; // 當前用戶是否是文件擁有者（與現有頁面命名一致）
 	}
 
-	let { documentId, isOpen = $bindable(false), canWrite, currentUserId, isOwner }: Props =
-		$props();
+	let { documentId, isOpen = $bindable(false), canWrite, currentUserId, isOwner }: Props = $props();
 
 	let comments = $state<Comment[]>([]);
 	let loading = $state(false);
@@ -164,7 +163,7 @@
 		const isAuthor = wsComment.author_id === currentUserId;
 
 		// 從 WSComment 提取需要的欄位，排除 author_id（Comment 介面沒有這個欄位）
-		const { author_id, ...rest } = wsComment;
+		const { author_id: _, ...rest } = wsComment;
 		const comment: Comment = {
 			...rest,
 			is_author: isAuthor,
@@ -218,17 +217,17 @@
 
 	<!-- 側邊面板 -->
 	<div
-		class="fixed top-0 right-0 z-50 flex h-full w-full flex-col border-l border-primary-200 bg-white shadow-2xl sm:w-96"
+		class="border-primary-200 fixed top-0 right-0 z-50 flex h-full w-full flex-col border-l bg-white shadow-2xl sm:w-96"
 	>
 		<!-- 標題 -->
-		<div class="flex items-center justify-between border-b border-primary-200 p-4">
+		<div class="border-primary-200 flex items-center justify-between border-b p-4">
 			<div class="flex items-center gap-2">
 				<MessageSquare size={20} class="text-primary-500" />
-				<h2 class="text-lg font-semibold text-primary-900">評論</h2>
+				<h2 class="text-primary-900 text-lg font-semibold">評論</h2>
 			</div>
 			<button
 				type="button"
-				class="cursor-pointer rounded-lg p-1.5 text-primary-400 transition-colors hover:bg-primary-100 hover:text-primary-600"
+				class="text-primary-400 hover:bg-primary-100 hover:text-primary-600 cursor-pointer rounded-lg p-1.5 transition-colors"
 				onclick={closePanel}
 				aria-label="關閉"
 			>
@@ -238,17 +237,17 @@
 
 		<!-- 新評論輸入區（僅有寫入權限時顯示） -->
 		{#if canWrite}
-			<div class="border-b border-primary-200 p-4">
+			<div class="border-primary-200 border-b p-4">
 				<textarea
-					class="w-full resize-none rounded-lg border border-primary-300 p-3 text-sm transition-all duration-150 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none"
+					class="border-primary-300 focus:border-primary-500 focus:ring-primary-500/20 w-full resize-none rounded-lg border p-3 text-sm transition-all duration-150 focus:ring-2 focus:outline-none"
 					rows="3"
 					placeholder="輸入評論..."
 					bind:value={newCommentContent}
 				></textarea>
 				<button
 					type="button"
-					class="mt-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white transition-colors
-							 hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+					class="bg-primary-600 hover:bg-primary-700 mt-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white
+							 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
 					onclick={handleSubmit}
 					disabled={submitting || !newCommentContent.trim()}
 				>
@@ -270,52 +269,50 @@
 			{#if loading}
 				<div class="flex items-center justify-center py-12">
 					<div
-						class="h-6 w-6 animate-spin rounded-full border-2 border-primary-200 border-t-primary-600"
+						class="border-primary-200 border-t-primary-600 h-6 w-6 animate-spin rounded-full border-2"
 					></div>
-					<span class="ml-2 text-primary-500">載入中...</span>
+					<span class="text-primary-500 ml-2">載入中...</span>
 				</div>
 			{:else if comments.length === 0}
 				<div class="py-12 text-center">
-					<MessageCircle size={40} class="mx-auto mb-3 text-primary-300" />
+					<MessageCircle size={40} class="text-primary-300 mx-auto mb-3" />
 					<p class="text-primary-500">尚無評論</p>
 				</div>
 			{:else}
-				<div class="divide-y divide-primary-100">
+				<div class="divide-primary-100 divide-y">
 					{#each comments as comment (comment.id)}
-						<div class="p-4 transition-colors hover:bg-primary-50/50">
+						<div class="hover:bg-primary-50/50 p-4 transition-colors">
 							<!-- 評論頭部 -->
 							<div class="flex items-center justify-between">
-								<span class="text-sm font-medium text-primary-800"
-									>{comment.author_username}</span
-								>
-								<span class="text-xs text-primary-500">{formatTime(comment.created_at)}</span>
+								<span class="text-primary-800 text-sm font-medium">{comment.author_username}</span>
+								<span class="text-primary-500 text-xs">{formatTime(comment.created_at)}</span>
 							</div>
 
 							<!-- 評論內容 -->
 							{#if editingId === comment.id}
 								<textarea
-									class="mt-2 w-full rounded-lg border border-primary-300 p-2 text-sm focus:border-primary-500 focus:outline-none"
+									class="border-primary-300 focus:border-primary-500 mt-2 w-full rounded-lg border p-2 text-sm focus:outline-none"
 									rows="2"
 									bind:value={editContent}
 								></textarea>
 								<div class="mt-2 flex gap-2">
 									<button
 										type="button"
-										class="cursor-pointer rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-700"
+										class="bg-primary-600 hover:bg-primary-700 cursor-pointer rounded-lg px-3 py-1.5 text-xs font-medium text-white"
 										onclick={() => saveEdit(comment.id)}
 									>
 										儲存
 									</button>
 									<button
 										type="button"
-										class="cursor-pointer rounded-lg bg-primary-100 px-3 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-200"
+										class="bg-primary-100 text-primary-700 hover:bg-primary-200 cursor-pointer rounded-lg px-3 py-1.5 text-xs font-medium"
 										onclick={cancelEdit}
 									>
 										取消
 									</button>
 								</div>
 							{:else}
-								<p class="mt-2 whitespace-pre-wrap text-sm text-primary-700">{comment.content}</p>
+								<p class="text-primary-700 mt-2 text-sm whitespace-pre-wrap">{comment.content}</p>
 
 								<!-- 操作按鈕 -->
 								{#if comment.is_author || comment.can_delete}
@@ -323,17 +320,17 @@
 										{#if comment.is_author}
 											<button
 												type="button"
-												class="flex cursor-pointer items-center gap-1 text-xs text-primary-500 transition-colors hover:text-primary-700"
+												class="text-primary-500 hover:text-primary-700 flex cursor-pointer items-center gap-1 text-xs transition-colors"
 												onclick={() => startEdit(comment)}
 											>
-												<Edit3 size={12} />
+												<PenLine size={12} />
 												編輯
 											</button>
 										{/if}
 										{#if comment.can_delete}
 											<button
 												type="button"
-												class="flex cursor-pointer items-center gap-1 text-xs text-primary-500 transition-colors hover:text-danger"
+												class="text-primary-500 hover:text-danger flex cursor-pointer items-center gap-1 text-xs transition-colors"
 												onclick={() => handleDelete(comment.id)}
 											>
 												<Trash2 size={12} />
@@ -345,7 +342,7 @@
 
 								<!-- 回覆數量 -->
 								{#if comment.reply_count > 0}
-									<div class="mt-2 flex items-center gap-1 text-xs text-primary-500">
+									<div class="text-primary-500 mt-2 flex items-center gap-1 text-xs">
 										<MessageCircle size={12} />
 										{comment.reply_count} 則回覆
 									</div>
@@ -358,13 +355,15 @@
 					<div class="p-4 text-center">
 						<button
 							type="button"
-							class="cursor-pointer rounded-lg px-4 py-2 text-sm font-medium text-primary-600 transition-colors hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-50"
+							class="text-primary-600 hover:bg-primary-100 cursor-pointer rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
 							onclick={loadMoreComments}
 							disabled={loadingMore}
 						>
 							{#if loadingMore}
 								<span class="inline-flex items-center gap-2">
-									<span class="h-4 w-4 animate-spin rounded-full border-2 border-primary-300 border-t-primary-600"></span>
+									<span
+										class="border-primary-300 border-t-primary-600 h-4 w-4 animate-spin rounded-full border-2"
+									></span>
 									載入中...
 								</span>
 							{:else}
@@ -385,5 +384,7 @@
 	confirmText="刪除"
 	variant="danger"
 	onConfirm={confirmDeleteComment}
-	onCancel={() => { pendingDeleteCommentId = null; }}
+	onCancel={() => {
+		pendingDeleteCommentId = null;
+	}}
 />

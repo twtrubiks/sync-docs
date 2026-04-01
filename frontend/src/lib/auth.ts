@@ -70,9 +70,7 @@ export async function refreshAccessToken(): Promise<boolean> {
 	if (refreshPromise) return refreshPromise;
 
 	refreshPromise = (async () => {
-		const storedRefreshToken = browser
-			? window.localStorage.getItem('refresh_token')
-			: null;
+		const storedRefreshToken = browser ? window.localStorage.getItem('refresh_token') : null;
 		if (!storedRefreshToken) return false;
 
 		try {

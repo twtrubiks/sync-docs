@@ -70,7 +70,7 @@ services:
       command: sh -c "npx svelte-kit sync && npm run dev"
       volumes:
         - ./frontend:/app
-        - /app/node_modules # 防止本地的 node_modules 覆蓋容器中已安裝的
+        - frontend-node-modules:/app/node_modules # 用 named volume 管理，依賴更新時執行 docker compose down -v 清除
       ports:
         - "5173:5173"
       depends_on:
@@ -79,3 +79,4 @@ services:
 volumes:
   db-data:
   redis-data:
+  frontend-node-modules:

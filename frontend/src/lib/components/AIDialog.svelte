@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { processWithAI } from '$lib/ai';
 	import { toastError, toastWarning } from '$lib/toast';
-	import { X, Sparkles, FileText, Wand2, Check } from 'lucide-svelte';
+	import { X, Sparkles, FileText, WandSparkles, Check } from '@lucide/svelte';
 
 	let {
 		isOpen = $bindable(false),
 		selectedText = '',
-		onApply = (text: string) => {}
+		onApply = (_text: string) => {}
 	}: {
 		isOpen: boolean;
 		selectedText: string;
@@ -85,17 +85,17 @@
 
 	<!-- Dialog -->
 	<div
-		class="fixed top-1/2 left-1/2 z-50 flex max-h-[80vh] w-[600px] max-w-[90vw]
-              -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-cta-200 bg-white shadow-2xl"
+		class="border-cta-200 fixed top-1/2 left-1/2 z-50 flex max-h-[80vh] w-[600px]
+              max-w-[90vw] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border bg-white shadow-2xl"
 	>
 		<!-- Header -->
-		<div class="flex items-center justify-between border-b border-cta-100 p-4">
-			<h2 class="flex items-center gap-2 text-lg font-semibold text-primary-900">
+		<div class="border-cta-100 flex items-center justify-between border-b p-4">
+			<h2 class="text-primary-900 flex items-center gap-2 text-lg font-semibold">
 				<Sparkles size={20} class="text-cta-500" />
 				AI 寫作助手
 			</h2>
 			<button
-				class="cursor-pointer rounded-lg p-1.5 text-primary-400 transition-colors hover:bg-primary-100 hover:text-primary-600"
+				class="text-primary-400 hover:bg-primary-100 hover:text-primary-600 cursor-pointer rounded-lg p-1.5 transition-colors"
 				onclick={close}
 				aria-label="Close dialog"
 			>
@@ -107,9 +107,9 @@
 		<div class="flex-1 space-y-4 overflow-y-auto p-5">
 			<!-- Selected text -->
 			<div>
-				<span class="mb-2 block text-sm font-medium text-primary-700">選取的文字</span>
+				<span class="text-primary-700 mb-2 block text-sm font-medium">選取的文字</span>
 				<div
-					class="max-h-32 overflow-y-auto rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-primary-700"
+					class="border-primary-200 bg-primary-50 text-primary-700 max-h-32 overflow-y-auto rounded-lg border p-3 text-sm"
 				>
 					{selectedText || '（未選取文字）'}
 				</div>
@@ -138,7 +138,7 @@
 					onclick={() => handleAction('polish')}
 					disabled={loading || !selectedText.trim()}
 				>
-					<Wand2 size={18} />
+					<WandSparkles size={18} />
 					潤稿
 				</button>
 			</div>
@@ -146,17 +146,18 @@
 			<!-- Result area -->
 			{#if loading}
 				<div class="flex items-center justify-center py-8">
-					<div class="h-8 w-8 animate-spin rounded-full border-3 border-cta-200 border-t-cta-500"
+					<div
+						class="border-cta-200 border-t-cta-500 h-8 w-8 animate-spin rounded-full border-3"
 					></div>
-					<span class="ml-3 text-primary-600">AI 處理中...</span>
+					<span class="text-primary-600 ml-3">AI 處理中...</span>
 				</div>
 			{:else if result}
 				<div>
-					<span class="mb-2 block text-sm font-medium text-primary-700">
+					<span class="text-primary-700 mb-2 block text-sm font-medium">
 						{actionLabels[currentAction!]}
 					</span>
 					<div
-						class="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg border border-cta-200 bg-cta-50 p-4 text-sm text-primary-800"
+						class="border-cta-200 bg-cta-50 text-primary-800 max-h-48 overflow-y-auto rounded-lg border p-4 text-sm whitespace-pre-wrap"
 					>
 						{result}
 					</div>
@@ -166,15 +167,15 @@
 
 		<!-- Footer buttons -->
 		{#if result}
-			<div class="flex justify-end gap-3 border-t border-primary-200 p-4">
+			<div class="border-primary-200 flex justify-end gap-3 border-t p-4">
 				<button
-					class="cursor-pointer rounded-lg border border-primary-300 px-4 py-2 font-medium text-primary-700 transition-colors hover:bg-primary-50"
+					class="border-primary-300 text-primary-700 hover:bg-primary-50 cursor-pointer rounded-lg border px-4 py-2 font-medium transition-colors"
 					onclick={close}
 				>
 					取消
 				</button>
 				<button
-					class="flex cursor-pointer items-center gap-2 rounded-lg bg-cta-500 px-4 py-2 font-medium text-white transition-colors hover:bg-cta-600"
+					class="bg-cta-500 hover:bg-cta-600 flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 font-medium text-white transition-colors"
 					onclick={handleApply}
 				>
 					<Check size={18} />

@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { post, del } from '$lib/auth';
 	import { getDocuments, type Document } from '$lib/api/documents';
-	import { Plus, FileText, Trash2, User as UserIcon, Eye, Pencil } from 'lucide-svelte';
+	import { Plus, FileText, Trash2, User as UserIcon, Eye, Pencil } from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	// Svelte 5 Runes: use $state() for reactive state
@@ -67,58 +67,58 @@
 <div class="mx-auto max-w-4xl">
 	<div class="mb-8 flex items-center justify-between">
 		<div>
-			<h1 class="text-3xl font-bold text-primary-900">Dashboard</h1>
-			<p class="mt-1 text-primary-600">Manage your documents</p>
+			<h1 class="text-primary-900 text-3xl font-bold">Dashboard</h1>
+			<p class="text-primary-600 mt-1">Manage your documents</p>
 		</div>
 		<!-- Svelte 5: onclick instead of on:click -->
 		<button
 			onclick={createNewDocument}
-			class="flex cursor-pointer items-center gap-2 rounded-lg bg-cta-500 px-5 py-2.5 font-semibold text-white shadow-md transition-all duration-150 hover:bg-cta-600 hover:shadow-lg"
+			class="bg-cta-500 hover:bg-cta-600 flex cursor-pointer items-center gap-2 rounded-lg px-5 py-2.5 font-semibold text-white shadow-md transition-all duration-150 hover:shadow-lg"
 		>
 			<Plus size={20} />
 			<span>New Document</span>
 		</button>
 	</div>
 
-	<div class="overflow-hidden rounded-xl border border-primary-200 bg-white shadow-lg">
+	<div class="border-primary-200 overflow-hidden rounded-xl border bg-white shadow-lg">
 		{#if loading}
 			<div class="flex items-center justify-center py-16">
 				<div
-					class="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600"
+					class="border-primary-200 border-t-primary-600 h-8 w-8 animate-spin rounded-full border-4"
 				></div>
-				<span class="ml-3 text-primary-600">Loading documents...</span>
+				<span class="text-primary-600 ml-3">Loading documents...</span>
 			</div>
 		{:else if documents.length === 0}
 			<div class="py-16 text-center">
 				<div
-					class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary-100"
+					class="bg-primary-100 mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full"
 				>
 					<FileText size={32} class="text-primary-400" />
 				</div>
-				<h3 class="text-lg font-medium text-primary-900">No documents yet</h3>
-				<p class="mt-1 text-primary-600">Create your first document to get started</p>
+				<h3 class="text-primary-900 text-lg font-medium">No documents yet</h3>
+				<p class="text-primary-600 mt-1">Create your first document to get started</p>
 				<button
 					onclick={createNewDocument}
-					class="mt-4 cursor-pointer rounded-lg bg-primary-600 px-4 py-2 font-medium text-white transition-colors hover:bg-primary-700"
+					class="bg-primary-600 hover:bg-primary-700 mt-4 cursor-pointer rounded-lg px-4 py-2 font-medium text-white transition-colors"
 				>
 					Create Document
 				</button>
 			</div>
 		{:else}
-			<ul class="divide-y divide-primary-100">
+			<ul class="divide-primary-100 divide-y">
 				{#each documents as doc (doc.id)}
 					<li
-						class="group flex items-center justify-between p-5 transition-colors duration-150 hover:bg-primary-50"
+						class="group hover:bg-primary-50 flex items-center justify-between p-5 transition-colors duration-150"
 					>
 						<a
 							href="/docs/{doc.id}"
-							class="flex flex-grow cursor-pointer items-center gap-3 text-lg font-medium text-primary-800 transition-colors hover:text-primary-600"
+							class="text-primary-800 hover:text-primary-600 flex flex-grow cursor-pointer items-center gap-3 text-lg font-medium transition-colors"
 						>
 							<FileText size={20} class="text-primary-400" />
 							{doc.title}
 						</a>
 						<div class="flex items-center gap-3">
-							<span class="flex items-center gap-1.5 text-sm text-primary-500">
+							<span class="text-primary-500 flex items-center gap-1.5 text-sm">
 								<UserIcon size={14} />
 								{doc.owner.username}
 							</span>
@@ -146,7 +146,7 @@
 										e.preventDefault();
 										deleteDocument(doc.id);
 									}}
-									class="cursor-pointer rounded-lg p-2 text-primary-400 opacity-0 transition-all duration-150 hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+									class="text-primary-400 cursor-pointer rounded-lg p-2 opacity-0 transition-all duration-150 group-hover:opacity-100 hover:bg-red-50 hover:text-red-600"
 									title="Delete document"
 								>
 									<Trash2 size={18} />
@@ -159,27 +159,25 @@
 
 			<!-- 分頁控制 -->
 			{#if totalPages > 1}
-				<div
-					class="flex items-center justify-between border-t border-primary-100 px-5 py-3"
-				>
-					<span class="text-sm text-primary-500">
+				<div class="border-primary-100 flex items-center justify-between border-t px-5 py-3">
+					<span class="text-primary-500 text-sm">
 						共 {total} 個文件
 					</span>
 					<div class="flex items-center gap-2">
 						<button
 							onclick={() => fetchDocuments(currentPage - 1)}
 							disabled={currentPage <= 1}
-							class="cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium text-primary-700 transition-colors hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-40"
+							class="text-primary-700 hover:bg-primary-100 cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40"
 						>
 							上一頁
 						</button>
-						<span class="text-sm text-primary-600">
+						<span class="text-primary-600 text-sm">
 							{currentPage} / {totalPages}
 						</span>
 						<button
 							onclick={() => fetchDocuments(currentPage + 1)}
 							disabled={currentPage >= totalPages}
-							class="cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium text-primary-700 transition-colors hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-40"
+							class="text-primary-700 hover:bg-primary-100 cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40"
 						>
 							下一頁
 						</button>
@@ -197,5 +195,7 @@
 	confirmText="刪除"
 	variant="danger"
 	onConfirm={confirmDeleteDocument}
-	onCancel={() => { pendingDeleteDocId = null; }}
+	onCancel={() => {
+		pendingDeleteDocId = null;
+	}}
 />

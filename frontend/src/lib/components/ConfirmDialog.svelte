@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { AlertTriangle, X } from 'lucide-svelte';
+	import { TriangleAlert, X } from '@lucide/svelte';
 
 	let {
 		isOpen = $bindable(false),
@@ -67,26 +67,26 @@
 
 	<!-- Dialog -->
 	<div
-		class="fixed top-1/2 left-1/2 z-50 w-[420px] max-w-[90vw]
-              -translate-x-1/2 -translate-y-1/2 rounded-xl border border-primary-200 bg-white shadow-2xl"
+		class="border-primary-200 fixed top-1/2 left-1/2 z-50 w-[420px]
+              max-w-[90vw] -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-white shadow-2xl"
 		role="alertdialog"
 		aria-modal="true"
 		aria-labelledby="confirm-dialog-title"
 		aria-describedby="confirm-dialog-message"
 	>
 		<!-- Header -->
-		<div class="flex items-center justify-between border-b border-primary-100 p-4">
+		<div class="border-primary-100 flex items-center justify-between border-b p-4">
 			<h2
 				id="confirm-dialog-title"
-				class="flex items-center gap-2 text-lg font-semibold text-primary-900"
+				class="text-primary-900 flex items-center gap-2 text-lg font-semibold"
 			>
 				<span class="flex h-8 w-8 items-center justify-center rounded-full {styles.iconBg}">
-					<AlertTriangle size={18} class={styles.icon} />
+					<TriangleAlert size={18} class={styles.icon} />
 				</span>
 				{title}
 			</h2>
 			<button
-				class="cursor-pointer rounded-lg p-1.5 text-primary-400 transition-colors hover:bg-primary-100 hover:text-primary-600"
+				class="text-primary-400 hover:bg-primary-100 hover:text-primary-600 cursor-pointer rounded-lg p-1.5 transition-colors"
 				onclick={handleCancel}
 				aria-label="關閉"
 			>
@@ -96,15 +96,15 @@
 
 		<!-- Content -->
 		<div class="p-5">
-			<p id="confirm-dialog-message" class="text-sm leading-relaxed text-primary-600">
+			<p id="confirm-dialog-message" class="text-primary-600 text-sm leading-relaxed">
 				{message}
 			</p>
 		</div>
 
 		<!-- Footer -->
-		<div class="flex justify-end gap-3 border-t border-primary-100 px-5 py-4">
+		<div class="border-primary-100 flex justify-end gap-3 border-t px-5 py-4">
 			<button
-				class="cursor-pointer rounded-lg border border-primary-300 px-4 py-2 text-sm font-medium text-primary-700 transition-colors hover:bg-primary-50"
+				class="border-primary-300 text-primary-700 hover:bg-primary-50 cursor-pointer rounded-lg border px-4 py-2 text-sm font-medium transition-colors"
 				onclick={handleCancel}
 			>
 				{cancelText}

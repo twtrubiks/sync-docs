@@ -28,8 +28,16 @@
 	onMount(() => {
 		if (!browser) return;
 
-		let textChangeHandler: ((delta: QuillDelta, oldDelta: QuillDelta, source: string) => void) | undefined;
-		let selectionChangeHandler: ((range: { index: number; length: number } | null, oldRange: unknown, source: string) => void) | undefined;
+		let textChangeHandler:
+			| ((delta: QuillDelta, oldDelta: QuillDelta, source: string) => void)
+			| undefined;
+		let selectionChangeHandler:
+			| ((
+					range: { index: number; length: number } | null,
+					oldRange: unknown,
+					source: string
+			  ) => void)
+			| undefined;
 
 		(async () => {
 			// Dynamically import Quill only on the client-side
@@ -70,11 +78,7 @@
 			}
 
 			// 定義事件處理函數（需要保存引用以便正確移除）
-			textChangeHandler = (
-				delta: QuillDelta,
-				_oldDelta: QuillDelta,
-				source: string
-			) => {
+			textChangeHandler = (delta: QuillDelta, _oldDelta: QuillDelta, source: string) => {
 				if (editor) {
 					value = editor.getContents();
 				}

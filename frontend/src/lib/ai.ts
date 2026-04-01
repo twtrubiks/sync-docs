@@ -22,12 +22,14 @@ export async function processWithAI(
 ): Promise<AIProcessResponse> {
 	// 若未提供 signal，自動建立超時控制
 	const controller = signal ? null : new AbortController();
-	const timeoutId = controller
-		? setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT)
-		: null;
+	const timeoutId = controller ? setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT) : null;
 
 	try {
-		return await post('/ai/process', request as unknown as Record<string, unknown>, controller?.signal || signal);
+		return await post(
+			'/ai/process',
+			request as unknown as Record<string, unknown>,
+			controller?.signal || signal
+		);
 	} finally {
 		if (timeoutId) clearTimeout(timeoutId);
 	}

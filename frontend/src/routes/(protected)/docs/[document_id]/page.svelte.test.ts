@@ -164,9 +164,7 @@ describe('Document Page - Load States', () => {
 	});
 
 	it('should retry loading when retry button is clicked', async () => {
-		vi.mocked(get)
-			.mockRejectedValueOnce(new Error('Network error'))
-			.mockResolvedValueOnce(mockDoc);
+		vi.mocked(get).mockRejectedValueOnce(new Error('Network error')).mockResolvedValueOnce(mockDoc);
 
 		render(Page);
 
@@ -187,9 +185,7 @@ describe('Document Page - Load States', () => {
 	});
 
 	it('should hide error UI after successful retry', async () => {
-		vi.mocked(get)
-			.mockRejectedValueOnce(new Error('Network error'))
-			.mockResolvedValueOnce(mockDoc);
+		vi.mocked(get).mockRejectedValueOnce(new Error('Network error')).mockResolvedValueOnce(mockDoc);
 
 		render(Page);
 

@@ -34,7 +34,16 @@ describe('documents API', () => {
 
 	it('returns PaginatedDocumentResponse structure', async () => {
 		const response = {
-			items: [{ id: '1', title: 'Doc', is_owner: true, owner: { id: 1, username: 'u', email: null }, permission: null, can_write: true }],
+			items: [
+				{
+					id: '1',
+					title: 'Doc',
+					is_owner: true,
+					owner: { id: 1, username: 'u', email: null },
+					permission: null,
+					can_write: true
+				}
+			],
 			total: 1,
 			page: 1,
 			page_size: 20,

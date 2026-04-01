@@ -21,7 +21,7 @@ vi.mock('$app/environment', () => ({
 }));
 
 import { processWithAI } from '$lib/ai';
-import { toastError, toastWarning } from '$lib/toast';
+import { toastError } from '$lib/toast';
 
 describe('AIDialog', () => {
 	beforeEach(() => {

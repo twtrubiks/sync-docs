@@ -139,9 +139,7 @@ describe('auth', () => {
 
 		it('throws error with detail string for non-401 errors', async () => {
 			setupAuth();
-			mockFetch.mockResolvedValueOnce(
-				createResponse({ detail: 'Not found' }, 404, 'Not Found')
-			);
+			mockFetch.mockResolvedValueOnce(createResponse({ detail: 'Not found' }, 404, 'Not Found'));
 
 			await expect(apiGet('/missing')).rejects.toThrow('Not found');
 		});
@@ -173,9 +171,7 @@ describe('auth', () => {
 				json: vi.fn().mockRejectedValue(new Error('not json'))
 			});
 
-			await expect(apiGet('/error')).rejects.toThrow(
-				'API request failed: Internal Server Error'
-			);
+			await expect(apiGet('/error')).rejects.toThrow('API request failed: Internal Server Error');
 		});
 	});
 
