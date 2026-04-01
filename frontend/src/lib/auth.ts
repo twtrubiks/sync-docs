@@ -111,14 +111,16 @@ async function apiFetch(url: string, options: RequestInit = {}, _isRetry = false
 	});
 
 	if (!response.ok) {
-		if (response.status === 401 && !_isRetry) {
-			// 嘗試用 refresh token 換取新的 access token，成功則重試一次
-			const refreshed = await refreshAccessToken();
-			if (refreshed) {
-				return apiFetch(url, options, true);
+		if (response.status === 401) {
+			if (!_isRetry) {
+				// 嘗試用 refresh token 換取新的 access token，成功則重試一次
+				const refreshed = await refreshAccessToken();
+				if (refreshed) {
+					return apiFetch(url, options, true);
+				}
 			}
 
-			// Refresh 也失敗，登出
+			// Refresh 失敗或重試後仍 401，一律登出
 			logout();
 			if (browser) {
 				goto('/login');

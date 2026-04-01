@@ -215,19 +215,20 @@ describe('auth', () => {
 			expect(mockGoto).toHaveBeenCalledWith('/login');
 		});
 
-		it('does not retry infinitely on persistent 401', async () => {
+		it('logs out when retry also returns 401', async () => {
 			setupAuth('old-token', 'valid-refresh');
 
 			mockFetch
 				.mockResolvedValueOnce(createResponse(null, 401, 'Unauthorized'))
 				.mockResolvedValueOnce(createResponse({ access: 'new-token' }))
-				.mockResolvedValueOnce(
-					createResponse({ detail: 'Still unauthorized' }, 401, 'Unauthorized')
-				);
+				.mockResolvedValueOnce(createResponse(null, 401, 'Unauthorized'));
 
-			await expect(apiGet('/protected')).rejects.toThrow('Still unauthorized');
+			await expect(apiGet('/protected')).rejects.toThrow('Unauthorized');
 			// 3 calls total: original + refresh + retry. No 4th call.
 			expect(mockFetch).toHaveBeenCalledTimes(3);
+			// 重試仍 401 → 登出
+			expect(storeGet(token)).toBeNull();
+			expect(mockGoto).toHaveBeenCalledWith('/login');
 		});
 	});
 
