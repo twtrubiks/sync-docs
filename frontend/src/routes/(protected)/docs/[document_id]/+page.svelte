@@ -649,7 +649,7 @@
 			<div class="header-right">
 				<!-- 在線用戶頭像 -->
 				<div class="online-users">
-					{#each [...onlineUsers.entries()] as [userId, user]}
+					{#each [...onlineUsers.entries()] as [userId, user] (userId)}
 						{#if userId !== currentUserId}
 							<div class="user-avatar" style="background-color: {user.color}" title={user.username}>
 								{user.username.charAt(0).toUpperCase()}
