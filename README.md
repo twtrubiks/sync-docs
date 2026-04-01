@@ -1,5 +1,17 @@
 # SyncDocs - 即時協作文件編輯器
 
+[![Python](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/)
+[![Django](https://img.shields.io/badge/Django-6.0-green.svg)](https://www.djangoproject.com/)
+[![SvelteKit](https://img.shields.io/badge/SvelteKit-2.x-orange.svg)](https://kit.svelte.dev/)
+[![Svelte](https://img.shields.io/badge/Svelte-5.x-red.svg)](https://svelte.dev/)
+[![Vite](https://img.shields.io/badge/Vite-7.x-purple.svg)](https://vite.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-24+-green.svg)](https://nodejs.org/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
+[![WebSocket](https://img.shields.io/badge/WebSocket-Real--time-orange.svg)](https://channels.readthedocs.io/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-blue.svg)](https://www.postgresql.org/)
+[![Redis](https://img.shields.io/badge/Redis-8-red.svg)](https://redis.io/)
+
 [English Version](README_en.md)
 
 SyncDocs 是一款受 Google Docs 啟發、基於現代技術堆疊打造的網頁協作文件編輯器。它允許使用者即時與他人建立、編輯和共享文件。
