@@ -95,7 +95,7 @@ Follow these steps to set up and run the project on your local machine.
 
 ### Prerequisites
 
-  * [Python](https://www.python.org/downloads/) 3.12+
+  * [Python](https://www.python.org/downloads/) 3.13+
   * [Node.js](https://nodejs.org/) 18+ and npm (or pnpm/yarn)
   * [Redis](https://redis.io/docs/getting-started/installation/) (for the real-time collaboration feature)
 
