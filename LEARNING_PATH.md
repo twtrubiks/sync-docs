@@ -26,7 +26,7 @@
 | Svelte / WebSocket | 可選 | 可以邊學邊做 |
 
 推薦學習資源：
-- [Django 官方教學](https://docs.djangoproject.com/zh-hans/5.2/intro/tutorial01/)
+- [Django 官方教學](https://docs.djangoproject.com/zh-hans/6.0/intro/tutorial01/)
 - [Svelte 互動式教學](https://svelte.dev/tutorial)
 
 ---

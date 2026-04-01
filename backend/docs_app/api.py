@@ -129,7 +129,7 @@ class DocumentController:
         try:
             logger.info(f"用戶 {user.username} 嘗試創建新文檔: {payload.title}")
             document = Document.objects.create(
-                **payload.dict(exclude_none=True),
+                **payload.model_dump(exclude_none=True),
                 owner=user
             )
             document.is_owner = True  # 創建者始終是擁有者
@@ -209,7 +209,7 @@ class DocumentController:
         content_changed = payload.content is not None and document.content != payload.content
 
         # 更新文檔屬性
-        for attr, value in payload.dict(exclude_unset=True).items():
+        for attr, value in payload.model_dump(exclude_unset=True).items():
             setattr(document, attr, value)
         document.save()
 

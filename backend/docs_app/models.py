@@ -160,7 +160,12 @@ class DocumentCollaborator(models.Model):
         """模型元數據"""
         verbose_name = "文檔協作者"
         verbose_name_plural = "文檔協作者"
-        unique_together = ['document', 'user']  # 確保唯一性
+        constraints = [
+            models.UniqueConstraint(
+                fields=['document', 'user'],
+                name='unique_document_collaborator',
+            ),
+        ]
         indexes = [
             models.Index(fields=['document', 'user']),
             models.Index(fields=['user']),
@@ -227,7 +232,12 @@ class DocumentVersion(models.Model):
         verbose_name = "文件版本"
         verbose_name_plural = "文件版本"
         ordering = ['-version_number']
-        unique_together = ['document', 'version_number']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['document', 'version_number'],
+                name='unique_document_version',
+            ),
+        ]
         indexes = [
             models.Index(fields=['document', '-version_number']),
         ]
