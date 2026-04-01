@@ -25,8 +25,13 @@
 		disabled?: boolean;
 	} = $props();
 
-	onMount(async () => {
-		if (browser) {
+	onMount(() => {
+		if (!browser) return;
+
+		let textChangeHandler: ((delta: QuillDelta, oldDelta: QuillDelta, source: string) => void) | undefined;
+		let selectionChangeHandler: ((range: { index: number; length: number } | null, oldRange: unknown, source: string) => void) | undefined;
+
+		(async () => {
 			// Dynamically import Quill only on the client-side
 			const module = await import('quill');
 			Quill = module.default;
@@ -65,20 +70,18 @@
 			}
 
 			// 定義事件處理函數（需要保存引用以便正確移除）
-			const textChangeHandler = (
+			textChangeHandler = (
 				delta: QuillDelta,
 				_oldDelta: QuillDelta,
 				source: string
 			) => {
-				// Always update the bound value
 				if (editor) {
 					value = editor.getContents();
 				}
-				// Call the callback prop instead of dispatching an event
 				onTextChange?.({ delta, source });
 			};
 
-			const selectionChangeHandler = (
+			selectionChangeHandler = (
 				range: { index: number; length: number } | null,
 				_oldRange: unknown,
 				source: string
@@ -88,20 +91,16 @@
 				}
 			};
 
-			// 監聽文字變化
 			editor.on('text-change', textChangeHandler);
-
-			// 新增：監聽游標變化
 			editor.on('selection-change', selectionChangeHandler);
+		})();
 
-			// 返回 cleanup 函數，在組件卸載時清理事件監聽器
-			return () => {
-				if (editor) {
-					editor.off('text-change', textChangeHandler);
-					editor.off('selection-change', selectionChangeHandler);
-				}
-			};
-		}
+		return () => {
+			if (editor) {
+				if (textChangeHandler) editor.off('text-change', textChangeHandler);
+				if (selectionChangeHandler) editor.off('selection-change', selectionChangeHandler);
+			}
+		};
 	});
 
 	// 游標操作方法（透過暴露的函數讓父組件呼叫）

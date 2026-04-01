@@ -96,7 +96,7 @@ describe('Document Page - Load States', () => {
 		vi.clearAllMocks();
 
 		// Mock WebSocket
-		global.WebSocket = vi.fn().mockImplementation(() => ({
+		globalThis.WebSocket = vi.fn().mockImplementation(() => ({
 			close: vi.fn(),
 			send: vi.fn(),
 			readyState: 1,

@@ -39,7 +39,7 @@
 	} as const;
 
 	// Svelte 5: $page store auto-subscription still works
-	const documentId = $page.params.document_id;
+	const documentId = $page.params.document_id!;
 
 	// Svelte 5 Runes: use $state() for reactive state
 	let title = $state('');
@@ -583,7 +583,7 @@
 			content = doc.content || { ops: [] };
 			// 更新編輯器內容
 			if (editor) {
-				editor.setContents(content, 'silent');
+				editor.setContents(content.ops, 'silent');
 			}
 			lastSavedTime = doc.updated_at;
 			saveStatus = 'saved';

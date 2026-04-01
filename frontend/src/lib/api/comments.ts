@@ -72,7 +72,7 @@ export async function createComment(
 	documentId: string,
 	payload: CommentCreatePayload
 ): Promise<Comment> {
-	return post(`/documents/${documentId}/comments/`, payload) as Promise<Comment>;
+	return post(`/documents/${documentId}/comments/`, payload as unknown as Record<string, unknown>) as Promise<Comment>;
 }
 
 /**
@@ -83,7 +83,7 @@ export async function updateComment(
 	commentId: string,
 	payload: CommentUpdatePayload
 ): Promise<Comment> {
-	return put(`/documents/${documentId}/comments/${commentId}/`, payload) as Promise<Comment>;
+	return put(`/documents/${documentId}/comments/${commentId}/`, payload as unknown as Record<string, unknown>) as Promise<Comment>;
 }
 
 /**

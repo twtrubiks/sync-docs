@@ -159,9 +159,6 @@ describe('VersionHistoryPanel', () => {
 			new_version_number: 3
 		});
 
-		// Mock confirm
-		vi.spyOn(window, 'confirm').mockReturnValue(true);
-
 		render(VersionHistoryPanel, {
 			props: {
 				documentId: 'doc-123',
@@ -180,7 +177,14 @@ describe('VersionHistoryPanel', () => {
 			expect(screen.getByText('還原到版本 2')).toBeInTheDocument();
 		});
 
+		// 點擊還原按鈕 → 開啟 ConfirmDialog
 		await fireEvent.click(screen.getByText('還原到版本 2'));
+
+		// 等待 ConfirmDialog 出現，點擊確認按鈕
+		await waitFor(() => {
+			expect(screen.getByText('還原')).toBeInTheDocument();
+		});
+		await fireEvent.click(screen.getByText('還原'));
 
 		await waitFor(() => {
 			expect(restoreVersion).toHaveBeenCalledWith('doc-123', 'version-1');

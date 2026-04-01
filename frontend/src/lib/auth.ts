@@ -89,10 +89,10 @@ export async function refreshAccessToken(): Promise<boolean> {
 			return true;
 		} catch {
 			return false;
-		} finally {
-			refreshPromise = null;
 		}
-	})();
+	})().finally(() => {
+		refreshPromise = null;
+	});
 
 	return refreshPromise;
 }

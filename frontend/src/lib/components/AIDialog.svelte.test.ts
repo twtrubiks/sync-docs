@@ -36,7 +36,7 @@ describe('AIDialog', () => {
 				onApply: vi.fn()
 			}
 		});
-		expect(screen.queryByText('AI Writing Assistant')).toBeNull();
+		expect(screen.queryByText('AI 寫作助手')).toBeNull();
 	});
 
 	it('should render when isOpen is true', () => {
@@ -47,7 +47,7 @@ describe('AIDialog', () => {
 				onApply: vi.fn()
 			}
 		});
-		expect(screen.getByText('AI Writing Assistant')).toBeInTheDocument();
+		expect(screen.getByText('AI 寫作助手')).toBeInTheDocument();
 		expect(screen.getByText('Test text')).toBeInTheDocument();
 	});
 
@@ -60,8 +60,8 @@ describe('AIDialog', () => {
 			}
 		});
 
-		const summarizeBtn = screen.getByText('Summarize');
-		const polishBtn = screen.getByText('Polish');
+		const summarizeBtn = screen.getByText('摘要');
+		const polishBtn = screen.getByText('潤稿');
 
 		expect(summarizeBtn).toBeDisabled();
 		expect(polishBtn).toBeDisabled();
@@ -76,8 +76,8 @@ describe('AIDialog', () => {
 			}
 		});
 
-		const summarizeBtn = screen.getByText('Summarize');
-		const polishBtn = screen.getByText('Polish');
+		const summarizeBtn = screen.getByText('摘要');
+		const polishBtn = screen.getByText('潤稿');
 
 		expect(summarizeBtn).not.toBeDisabled();
 		expect(polishBtn).not.toBeDisabled();
@@ -96,9 +96,9 @@ describe('AIDialog', () => {
 			}
 		});
 
-		await fireEvent.click(screen.getByText('Summarize'));
+		await fireEvent.click(screen.getByText('摘要'));
 
-		expect(screen.getByText('AI processing...')).toBeInTheDocument();
+		expect(screen.getByText('AI 處理中...')).toBeInTheDocument();
 	});
 
 	it('should show result when API succeeds', async () => {
@@ -116,11 +116,11 @@ describe('AIDialog', () => {
 			}
 		});
 
-		await fireEvent.click(screen.getByText('Summarize'));
+		await fireEvent.click(screen.getByText('摘要'));
 
 		await waitFor(() => {
 			expect(screen.getByText('AI result text')).toBeInTheDocument();
-			expect(screen.getByText('Apply Result')).toBeInTheDocument();
+			expect(screen.getByText('套用結果')).toBeInTheDocument();
 		});
 	});
 
@@ -140,7 +140,7 @@ describe('AIDialog', () => {
 			}
 		});
 
-		await fireEvent.click(screen.getByText('Summarize'));
+		await fireEvent.click(screen.getByText('摘要'));
 
 		await waitFor(() => {
 			expect(toastError).toHaveBeenCalledWith('Test error');
@@ -160,14 +160,14 @@ describe('AIDialog', () => {
 			}
 		});
 
-		await fireEvent.click(screen.getByText('Summarize'));
+		await fireEvent.click(screen.getByText('摘要'));
 
 		await waitFor(() => {
 			expect(toastError).toHaveBeenCalledWith('Request timed out, please try again');
 		});
 	});
 
-	it('should call onApply when Apply Result is clicked', async () => {
+	it('should call onApply when 套用結果 is clicked', async () => {
 		const onApply = vi.fn();
 		vi.mocked(processWithAI).mockResolvedValue({
 			success: true,
@@ -183,13 +183,13 @@ describe('AIDialog', () => {
 			}
 		});
 
-		await fireEvent.click(screen.getByText('Summarize'));
+		await fireEvent.click(screen.getByText('摘要'));
 
 		await waitFor(() => {
-			expect(screen.getByText('Apply Result')).toBeInTheDocument();
+			expect(screen.getByText('套用結果')).toBeInTheDocument();
 		});
 
-		await fireEvent.click(screen.getByText('Apply Result'));
+		await fireEvent.click(screen.getByText('套用結果'));
 
 		expect(onApply).toHaveBeenCalledWith('AI result text');
 	});
@@ -209,7 +209,7 @@ describe('AIDialog', () => {
 			}
 		});
 
-		await fireEvent.click(screen.getByText('Summarize'));
+		await fireEvent.click(screen.getByText('摘要'));
 
 		expect(processWithAI).toHaveBeenCalledWith({
 			action: 'summarize',
@@ -232,7 +232,7 @@ describe('AIDialog', () => {
 			}
 		});
 
-		await fireEvent.click(screen.getByText('Polish'));
+		await fireEvent.click(screen.getByText('潤稿'));
 
 		expect(processWithAI).toHaveBeenCalledWith({
 			action: 'polish',
