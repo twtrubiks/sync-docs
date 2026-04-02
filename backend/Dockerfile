@@ -2,20 +2,14 @@ FROM python:3.13-slim
 LABEL maintainer twtrubiks
 ENV PYTHONUNBUFFERED=1
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
-
 # 建立非 root 使用者
 RUN groupadd --gid 1000 appuser && \
     useradd --uid 1000 --gid appuser --create-home appuser
 
 WORKDIR /sync-docs
 
-# 安裝 uv（以 root 安裝到全域路徑）
-ADD https://astral.sh/uv/install.sh /uv-installer.sh
-RUN sh /uv-installer.sh && rm /uv-installer.sh
-ENV PATH="/root/.local/bin/:$PATH"
+# 安裝 uv（從官方映像複製靜態二進位檔到共享路徑）
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # 先複製 requirements.txt 安裝依賴（利用 Docker layer cache）
 COPY requirements.txt .
