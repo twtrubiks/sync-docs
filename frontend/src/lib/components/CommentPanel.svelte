@@ -10,7 +10,17 @@
 		type CommentCreatePayload
 	} from '$lib/api/comments';
 	import { toastSuccess, toastError } from '$lib/toast';
-	import { X, MessageSquare, Send, PenLine, Trash2, MessageCircle, ChevronDown, ChevronUp } from '@lucide/svelte';
+	import {
+		X,
+		MessageSquare,
+		Send,
+		PenLine,
+		Trash2,
+		MessageCircle,
+		ChevronDown,
+		ChevronUp,
+		Reply
+	} from '@lucide/svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 
 	interface Props {
@@ -38,7 +48,9 @@
 	// ========== 回覆相關狀態 ==========
 	let expandedReplies = $state<Record<string, Comment[]>>({});
 	let loadingReplies = $state<Record<string, boolean>>({});
-	let knownReplyIds = $state<Set<string>>(new Set());
+	let replyingTo = $state<string | null>(null);
+	let replyContent = $state('');
+	let submittingReply = $state(false);
 
 	// ========== 載入評論（第一頁） ==========
 	async function loadComments() {
@@ -46,6 +58,7 @@
 
 		loading = true;
 		currentPage = 1;
+		expandedReplies = {};
 		try {
 			const result = await getComments(documentId, 1);
 			comments = result.comments;
@@ -125,9 +138,50 @@
 		}
 	}
 
+	// ========== 回覆評論 ==========
+	function startReply(commentId: string) {
+		cancelEdit();
+		replyingTo = commentId;
+		replyContent = '';
+	}
+
+	function cancelReply() {
+		replyingTo = null;
+		replyContent = '';
+	}
+
+	async function submitReply(parentId: string) {
+		if (!replyContent.trim() || submittingReply) return;
+
+		submittingReply = true;
+		try {
+			const payload: CommentCreatePayload = {
+				content: replyContent.trim(),
+				parent_id: parentId
+			};
+			const newReply = await createComment(documentId, payload);
+
+			// 樂觀更新：立即顯示在展開的回覆列表中（reply_count 由 WebSocket 統一更新，避免 race condition）
+			if (expandedReplies[parentId]) {
+				expandedReplies = {
+					...expandedReplies,
+					[parentId]: [...expandedReplies[parentId], newReply]
+				};
+			}
+
+			cancelReply();
+			toastSuccess('回覆已發送');
+		} catch (error) {
+			toastError('發送回覆失敗');
+			console.error('Failed to create reply:', error);
+		} finally {
+			submittingReply = false;
+		}
+	}
 
 	// ========== 編輯評論 ==========
 	function startEdit(comment: Comment) {
+		cancelReply();
 		editingId = comment.id;
 		editContent = comment.content;
 	}
@@ -201,16 +255,12 @@
 		};
 
 		if (wsComment.parent_id) {
-			// 去重：如果是自己剛提交的回覆，跳過（submitReply 已處理）
-			if (knownReplyIds.has(wsComment.id)) {
-				knownReplyIds = new Set([...knownReplyIds].filter((id) => id !== wsComment.id));
-				return;
-			}
-
-			// 其他人的回覆：更新 reply_count 並加入已展開的回覆列表
+			// 更新父評論的 reply_count
 			comments = comments.map((c) =>
 				c.id === wsComment.parent_id ? { ...c, reply_count: c.reply_count + 1 } : c
 			);
+
+			// 加入已展開的回覆列表（去重：submitReply 可能已先加入）
 			if (expandedReplies[wsComment.parent_id]) {
 				const existing = expandedReplies[wsComment.parent_id];
 				if (!existing.find((r) => r.id === wsComment.id)) {
@@ -349,7 +399,7 @@
 							<!-- 評論內容 -->
 							{#if editingId === comment.id}
 								<textarea
-									class="border-primary-300 focus:border-primary-500 mt-2 w-full rounded-lg border p-2 text-sm focus:outline-none"
+									class="border-primary-300 focus:border-primary-500 focus:ring-primary-500/20 mt-2 w-full resize-none rounded-lg border p-2 text-sm transition-all duration-150 focus:ring-2 focus:outline-none"
 									rows="2"
 									bind:value={editContent}
 								></textarea>
@@ -373,8 +423,18 @@
 								<p class="text-primary-700 mt-2 text-sm whitespace-pre-wrap">{comment.content}</p>
 
 								<!-- 操作按鈕 -->
-								{#if comment.is_author || comment.can_delete}
+								{#if canWrite || comment.is_author || comment.can_delete}
 									<div class="mt-3 flex gap-3">
+										{#if canWrite}
+											<button
+												type="button"
+												class="text-primary-500 hover:text-primary-700 flex cursor-pointer items-center gap-1 text-xs transition-colors"
+												onclick={() => startReply(comment.id)}
+											>
+												<Reply size={12} />
+												回覆
+											</button>
+										{/if}
 										{#if comment.is_author}
 											<button
 												type="button"
@@ -398,6 +458,42 @@
 									</div>
 								{/if}
 
+								<!-- 回覆輸入框 -->
+								{#if replyingTo === comment.id}
+									<div class="mt-3">
+										<textarea
+											class="border-primary-300 focus:border-primary-500 focus:ring-primary-500/20 w-full resize-none rounded-lg border p-2 text-sm transition-all duration-150 focus:ring-2 focus:outline-none"
+											rows="2"
+											placeholder="輸入回覆..."
+											bind:value={replyContent}
+										></textarea>
+										<div class="mt-2 flex gap-2">
+											<button
+												type="button"
+												class="bg-primary-600 hover:bg-primary-700 flex cursor-pointer items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+												onclick={() => submitReply(comment.id)}
+												disabled={submittingReply || !replyContent.trim()}
+											>
+												{#if submittingReply}
+													<span
+														class="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent"
+													></span>
+												{:else}
+													<Send size={12} />
+												{/if}
+												發送
+											</button>
+											<button
+												type="button"
+												class="bg-primary-100 text-primary-700 hover:bg-primary-200 cursor-pointer rounded-lg px-3 py-1.5 text-xs font-medium"
+												onclick={cancelReply}
+											>
+												取消
+											</button>
+										</div>
+									</div>
+								{/if}
+
 								<!-- 回覆數量（可展開） -->
 								{#if comment.reply_count > 0}
 									<button
@@ -406,7 +502,9 @@
 										onclick={() => toggleReplies(comment.id)}
 									>
 										{#if loadingReplies[comment.id]}
-											<span class="border-primary-300 border-t-primary-600 h-3 w-3 animate-spin rounded-full border-2"></span>
+											<span
+												class="border-primary-300 border-t-primary-600 h-3 w-3 animate-spin rounded-full border-2"
+											></span>
 										{:else if expandedReplies[comment.id]}
 											<ChevronUp size={14} />
 										{:else}
@@ -420,12 +518,18 @@
 									{#if expandedReplies[comment.id]}
 										<div class="border-primary-200 mt-2 space-y-2 border-l-2 pl-3">
 											{#each expandedReplies[comment.id] as reply (reply.id)}
-												<div class="rounded-lg bg-primary-50/50 p-2.5">
+												<div class="bg-primary-50/50 rounded-lg p-2.5">
 													<div class="flex items-center justify-between">
-														<span class="text-primary-800 text-xs font-medium">{reply.author_username}</span>
-														<span class="text-primary-400 text-xs">{formatTime(reply.created_at)}</span>
+														<span class="text-primary-800 text-xs font-medium"
+															>{reply.author_username}</span
+														>
+														<span class="text-primary-400 text-xs"
+															>{formatTime(reply.created_at)}</span
+														>
 													</div>
-													<p class="text-primary-700 mt-1 text-sm whitespace-pre-wrap">{reply.content}</p>
+													<p class="text-primary-700 mt-1 text-sm whitespace-pre-wrap">
+														{reply.content}
+													</p>
 												</div>
 											{/each}
 										</div>
