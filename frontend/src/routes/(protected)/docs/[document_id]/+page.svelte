@@ -89,7 +89,7 @@
 	let commentPanel: CommentPanel;
 
 	// Cursor and Presence state
-	let quillEditor: QuillEditor;
+	let quillEditor = $state<QuillEditor>();
 	let onlineUsers = $state<Map<string, PresenceUser>>(new Map());
 	let currentUserId = $state<string | null>(null);
 
