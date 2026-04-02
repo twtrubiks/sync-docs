@@ -56,7 +56,7 @@ export function logout() {
 	user.set(null);
 }
 
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = '/api';
 
 // 防止多個請求同時觸發 refresh
 let refreshPromise: Promise<boolean> | null = null;
@@ -74,11 +74,7 @@ export async function refreshAccessToken(): Promise<boolean> {
 		if (!storedRefreshToken) return false;
 
 		try {
-			const response = await fetch(`${API_BASE_URL}/token/refresh`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ refresh: storedRefreshToken })
-			});
+			const response = await publicPost('/token/refresh', { refresh: storedRefreshToken });
 
 			if (!response.ok) return false;
 
@@ -179,6 +175,15 @@ export function put(url: string, data: Record<string, unknown>) {
 
 export function del(url: string) {
 	return apiFetch(url, { method: 'DELETE' });
+}
+
+export async function publicPost(url: string, data: Record<string, unknown>) {
+	const response = await fetch(`${API_BASE_URL}${url}`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(data)
+	});
+	return response;
 }
 
 // Fetch current user info

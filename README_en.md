@@ -199,16 +199,10 @@ npm install
 npm run dev -- --open
 ```
 
-**Frontend Environment Variables:**
+**Frontend API Connection:**
 
-`frontend/.env` must exist, as SvelteKit reads this file directly:
-
-```env
-PUBLIC_API_URL=http://127.0.0.1:8000
-```
-
-* Variables with `PUBLIC_` prefix are exposed to the client
-* Restart the development server after modifications
+The frontend uses relative paths (`/api`, `/ws`) to access the backend, so no API URL environment variable is needed.
+In development, Vite proxy forwards requests automatically; in production, a reverse proxy (e.g., nginx) handles routing.
 
 ### Accessing the Application
 

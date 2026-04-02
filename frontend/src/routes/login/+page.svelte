@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { token, refreshToken, fetchCurrentUser } from '$lib/auth';
+	import { token, refreshToken, fetchCurrentUser, publicPost } from '$lib/auth';
 	import { goto } from '$app/navigation';
 	import { toastError } from '$lib/toast';
 	import { LogIn, User, Lock } from '@lucide/svelte';
@@ -12,13 +12,7 @@
 	async function handleSubmit() {
 		isLoading = true;
 		try {
-			const response = await fetch('/api/token/pair', {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({ username: username, password: password })
-			});
+			const response = await publicPost('/token/pair', { username, password });
 
 			if (response.ok) {
 				const data = await response.json();

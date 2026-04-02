@@ -43,6 +43,7 @@ import {
 	post as apiPost,
 	put as apiPut,
 	del as apiDel,
+	publicPost,
 	fetchCurrentUser
 } from '$lib/auth';
 
@@ -87,7 +88,7 @@ describe('auth', () => {
 			expect(result).toEqual({ id: 1 });
 			expect(mockFetch).toHaveBeenCalledOnce();
 			const [url, options] = mockFetch.mock.calls[0];
-			expect(url).toBe('http://localhost:8000/api/test');
+			expect(url).toBe('/api/test');
 			expect(options.method).toBe('GET');
 			expect(options.headers.get('Authorization')).toBe('Bearer test-token');
 			expect(options.headers.get('Content-Type')).toBe('application/json');
@@ -101,7 +102,7 @@ describe('auth', () => {
 
 			expect(result).toEqual({ success: true });
 			const [url, options] = mockFetch.mock.calls[0];
-			expect(url).toBe('http://localhost:8000/api/items');
+			expect(url).toBe('/api/items');
 			expect(options.method).toBe('POST');
 			expect(options.body).toBe(JSON.stringify({ name: 'test' }));
 		});
@@ -113,7 +114,7 @@ describe('auth', () => {
 			await apiPut('/items/1', { name: 'updated' });
 
 			const [url, options] = mockFetch.mock.calls[0];
-			expect(url).toBe('http://localhost:8000/api/items/1');
+			expect(url).toBe('/api/items/1');
 			expect(options.method).toBe('PUT');
 			expect(options.body).toBe(JSON.stringify({ name: 'updated' }));
 		});
@@ -125,7 +126,7 @@ describe('auth', () => {
 			await apiDel('/items/1');
 
 			const [url, options] = mockFetch.mock.calls[0];
-			expect(url).toBe('http://localhost:8000/api/items/1');
+			expect(url).toBe('/api/items/1');
 			expect(options.method).toBe('DELETE');
 		});
 
@@ -193,7 +194,7 @@ describe('auth', () => {
 
 			// Verify refresh was called correctly
 			const [refreshUrl, refreshOptions] = mockFetch.mock.calls[1];
-			expect(refreshUrl).toBe('http://localhost:8000/api/token/refresh');
+			expect(refreshUrl).toBe('/api/token/refresh');
 			expect(JSON.parse(refreshOptions.body)).toEqual({ refresh: 'valid-refresh' });
 
 			// Verify retry used the new token
@@ -276,6 +277,28 @@ describe('auth', () => {
 			expect(r1).toBe(true);
 			expect(r2).toBe(true);
 			expect(mockFetch).toHaveBeenCalledOnce();
+		});
+	});
+
+	// ── publicPost ──
+
+	describe('publicPost', () => {
+		it('sends POST without Authorization header', async () => {
+			setupAuth();
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				json: vi.fn().mockResolvedValue({ access: 'tok', refresh: 'ref' })
+			});
+
+			await publicPost('/token/pair', { username: 'u', password: 'p' });
+
+			expect(mockFetch).toHaveBeenCalledOnce();
+			const [url, options] = mockFetch.mock.calls[0];
+			expect(url).toBe('/api/token/pair');
+			expect(options.method).toBe('POST');
+			expect(options.headers['Content-Type']).toBe('application/json');
+			expect(options.headers['Authorization']).toBeUndefined();
 		});
 	});
 

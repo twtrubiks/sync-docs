@@ -199,16 +199,10 @@ npm install
 npm run dev -- --open
 ```
 
-**前端環境變數說明：**
+**前端 API 連線說明：**
 
-`frontend/.env` 必須存在，SvelteKit 會直接讀取此檔案：
-
-```env
-PUBLIC_API_URL=http://127.0.0.1:8000
-```
-
-* `PUBLIC_` 前綴的變數會暴露給客戶端
-* 修改後需重新啟動開發伺服器
+前端使用相對路徑（`/api`、`/ws`）存取後端，不需要設定 API URL 環境變數。
+開發環境由 Vite proxy 自動轉發請求，生產環境由反向代理（如 nginx）處理。
 
 ### 存取應用程式
 

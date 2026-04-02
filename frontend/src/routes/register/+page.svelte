@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { publicPost } from '$lib/auth';
 	import { toastSuccess, toastError } from '$lib/toast';
 	import { UserPlus, User, Mail, Lock, ShieldCheck } from '@lucide/svelte';
 
@@ -18,16 +19,10 @@
 
 		isLoading = true;
 		try {
-			const response = await fetch('/api/auth/register', {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({
-					username,
-					password,
-					...(email.trim() && { email: email.trim() })
-				})
+			const response = await publicPost('/auth/register', {
+				username,
+				password,
+				...(email.trim() && { email: email.trim() })
 			});
 
 			if (response.ok) {

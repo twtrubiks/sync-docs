@@ -256,7 +256,7 @@
 		}
 		const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 		// 使用 subprotocol 傳遞 token，而非 URL query string（更安全）
-		const wsUrl = `${wsProtocol}//localhost:8000/ws/docs/${documentId}/`;
+		const wsUrl = `${wsProtocol}//${window.location.host}/ws/docs/${documentId}/`;
 		socket = new WebSocket(wsUrl, [`access_token.${token}`]);
 
 		socket.onopen = () => {
