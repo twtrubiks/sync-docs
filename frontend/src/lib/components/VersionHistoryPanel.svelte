@@ -22,7 +22,10 @@
 	let loading = $state(false);
 	let loadingMore = $state(false);
 	let selectedVersion = $state<DocumentVersion | null>(null);
-	let _previewContent = $state<Record<string, unknown> | null>(null);
+	let previewContent = $state<Record<string, unknown> | null>(null);
+	let loadingPreview = $state(false);
+	let previewContainer: HTMLElement | undefined;
+	let previewQuill: import('quill').default | null = null;
 	let restoring = $state(false);
 	let currentPage = $state(1);
 	let totalPages = $state(1);
@@ -65,15 +68,37 @@
 		}
 	}
 
+	// 初始化或更新 readOnly Quill 預覽實例
+	async function renderPreview(content: Record<string, unknown>) {
+		if (!previewContainer) return;
+		if (!previewQuill) {
+			const { default: Quill } = await import('quill');
+			previewQuill = new Quill(previewContainer, {
+				theme: 'snow',
+				readOnly: true,
+				modules: { toolbar: false }
+			});
+		}
+		const ops = (content as { ops?: unknown[] }).ops;
+		if (Array.isArray(ops)) {
+			previewQuill.setContents(ops, 'silent');
+		}
+	}
+
 	// 預覽版本
 	async function previewVersion(version: DocumentVersion) {
+		if (selectedVersion?.id === version.id) return;
 		selectedVersion = version;
+		loadingPreview = true;
 		try {
 			const detail = await getVersionDetail(documentId, version.id);
-			_previewContent = detail.content;
+			previewContent = detail.content;
+			await renderPreview(detail.content);
 		} catch (error) {
 			toastError('載入版本內容失敗');
 			console.error('Failed to load version detail:', error);
+		} finally {
+			loadingPreview = false;
 		}
 	}
 
@@ -116,8 +141,9 @@
 	// 關閉面板
 	function closePanel() {
 		isOpen = false;
+		previewQuill = null;
 		selectedVersion = null;
-		_previewContent = null;
+		previewContent = null;
 	}
 
 	// 監聽 isOpen 變化載入版本
@@ -220,6 +246,31 @@
 			{/if}
 		</div>
 
+		<!-- 版本內容預覽 -->
+		{#if selectedVersion}
+			<div class="border-primary-200 border-t">
+				<div class="border-primary-200 bg-primary-50 flex items-center gap-2 border-b px-4 py-2">
+					<span class="text-primary-700 text-sm font-medium">
+						版本 {selectedVersion.version_number} 預覽
+					</span>
+				</div>
+				<div class="preview-quill max-h-[27rem] overflow-y-auto">
+					{#if loadingPreview}
+						<div class="flex items-center justify-center py-4">
+							<div
+								class="border-primary-200 border-t-primary-600 h-4 w-4 animate-spin rounded-full border-2"
+							></div>
+							<span class="text-primary-500 ml-2 text-sm">載入中...</span>
+						</div>
+					{/if}
+					<div bind:this={previewContainer} class:hidden={loadingPreview || !previewContent}></div>
+					{#if !loadingPreview && !previewContent}
+						<p class="text-primary-400 p-4 text-sm">無法載入內容</p>
+					{/if}
+				</div>
+			</div>
+		{/if}
+
 		<!-- 還原按鈕 -->
 		{#if selectedVersion}
 			<div class="border-primary-200 border-t p-4">
@@ -255,3 +306,18 @@
 	variant="warning"
 	onConfirm={confirmRestore}
 />
+
+<style>
+	.preview-quill :global(.ql-toolbar) {
+		display: none;
+	}
+	.preview-quill :global(.ql-container) {
+		border: none;
+		font-size: 14px;
+	}
+	.preview-quill :global(.ql-editor) {
+		padding: 0.75rem 1rem;
+		min-height: auto;
+		line-height: 1.5;
+	}
+</style>
