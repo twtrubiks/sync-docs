@@ -27,7 +27,7 @@ def test_user_registration(client, user_data):
         data=json.dumps(user_data),
         content_type="application/json"
     )
-    assert response.status_code == 200
+    assert response.status_code == 201
     response_data = response.json()
     assert response_data["username"] == user_data["username"]
     assert "password" not in response_data
@@ -120,7 +120,7 @@ def test_user_registration_with_duplicate_username(client, user_data):
         data=json.dumps(user_data),
         content_type="application/json"
     )
-    assert response1.status_code == 200
+    assert response1.status_code == 201
 
     # 2. 嘗試用相同用戶名再次註冊
     response2 = client.post(
@@ -171,7 +171,7 @@ def test_user_registration_with_common_password(client):
         content_type="application/json"
     )
 
-    if response.status_code == 200:
+    if response.status_code == 201:
         # 密碼驗證通過，註冊成功
         assert User.objects.count() == 1
     else:
@@ -328,7 +328,7 @@ def test_user_registration_with_email(client):
         content_type="application/json"
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     response_data = response.json()
     assert response_data["username"] == "emailuser"
     assert response_data["email"] == "user@example.com"
@@ -349,7 +349,7 @@ def test_user_registration_without_email(client, user_data):
         content_type="application/json"
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     response_data = response.json()
     assert response_data["username"] == user_data["username"]
     # email 應該是 None 或空字串

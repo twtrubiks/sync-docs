@@ -29,7 +29,7 @@ class AuthController(NinjaJWTDefaultController):
     繼承自NinjaJWTDefaultController，自動提供JWT登錄和刷新token功能
     """
 
-    @http_post("/register", response=UserSchema, auth=None)
+    @http_post("/register", response={201: UserSchema}, auth=None)
     def register(self, payload: RegisterSchema):
         """
         註冊新用戶
@@ -62,7 +62,7 @@ class AuthController(NinjaJWTDefaultController):
             )
 
             logger.info(f"成功註冊新用戶: {user.username}")
-            return user
+            return 201, user
 
         except ValidationError as e:
             messages = e.messages if hasattr(e, 'messages') else [str(e)]

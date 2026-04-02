@@ -373,7 +373,7 @@ class TestCommentAPI:
             content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {token}"
         )
-        assert response.status_code == 200
+        assert response.status_code == 201
         data = response.json()
         assert data["content"] == "New comment"
         assert data["is_author"] is True
@@ -388,7 +388,7 @@ class TestCommentAPI:
             content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {token}"
         )
-        assert response.status_code == 200
+        assert response.status_code == 201
         assert response.json()["parent_id"] == str(own_comment.id)
 
     def test_list_replies(self, authenticated_client, test_document, own_comment):

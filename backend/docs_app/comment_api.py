@@ -163,7 +163,7 @@ class CommentController:
 
         return result
 
-    @http_post("/{document_id}/comments/", response=CommentSchema)
+    @http_post("/{document_id}/comments/", response={201: CommentSchema})
     def create_comment(self, document_id: uuid.UUID, payload: CommentCreateSchema):
         """創建評論（需要寫入權限）"""
         user = self.context.request.auth
@@ -197,7 +197,7 @@ class CommentController:
             }
         })
 
-        return CommentSchema(
+        return 201, CommentSchema(
             id=comment.id,
             content=comment.content,
             author_username=comment.author_username,

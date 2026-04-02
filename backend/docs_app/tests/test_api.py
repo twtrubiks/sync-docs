@@ -88,8 +88,7 @@ def test_create_document(authenticated_client):
         HTTP_AUTHORIZATION=f"Bearer {access_token}"
     )
 
-    # API 目前回傳 200 OK 而非 201 Created
-    assert response.status_code == 200, f"Create document failed: {response.content.decode()}"
+    assert response.status_code == 201, f"Create document failed: {response.content.decode()}"
     response_data = response.json()
     assert response_data["title"] == document_data["title"]
     assert response_data["owner"]["id"] == user.id
@@ -342,7 +341,7 @@ def test_owner_can_share_document(authenticated_client, collaborator_user_and_to
         content_type="application/json",
         HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
     )
-    assert response.status_code == 200
+    assert response.status_code == 201
     document_id = response.json()["id"]
     document = Document.objects.get(id=document_id)
 
@@ -354,7 +353,7 @@ def test_owner_can_share_document(authenticated_client, collaborator_user_and_to
         content_type="application/json",
         HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
     )
-    assert response_share.status_code == 200, f"Share document failed: {response_share.content.decode()}"
+    assert response_share.status_code == 201, f"Share document failed: {response_share.content.decode()}"
 
     # 驗證協作者已加入 collaborators
     document.refresh_from_db()
@@ -385,7 +384,7 @@ def test_collaborator_can_access_shared_document(authenticated_client, collabora
         content_type="application/json",
         HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
     )
-    assert response_create.status_code == 200
+    assert response_create.status_code == 201
     document_id = response_create.json()["id"]
 
     # 2. 擁有者與協作者分享文檔
@@ -396,7 +395,7 @@ def test_collaborator_can_access_shared_document(authenticated_client, collabora
         content_type="application/json",
         HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
     )
-    assert response_share.status_code == 200
+    assert response_share.status_code == 201
 
     # 3. 協作者嘗試存取文檔
     response_access = client.get(
@@ -419,7 +418,7 @@ def test_collaborator_can_edit_shared_document(authenticated_client, collaborato
     response_create = client.post(
         "/api/documents/", data=doc_data, content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
     )
-    assert response_create.status_code == 200
+    assert response_create.status_code == 201
     document_id = response_create.json()["id"]
 
     # 2. Owner shares the document with the collaborator (default write permission)
@@ -428,7 +427,7 @@ def test_collaborator_can_edit_shared_document(authenticated_client, collaborato
         f"/api/documents/{document_id}/collaborators/",
         data=json.dumps(share_data), content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
     )
-    assert response_share.status_code == 200
+    assert response_share.status_code == 201
 
     # 3. Collaborator tries to edit the document
     edit_data = {"title": "Edited by Collaborator", "content": {"data": "collaborator's new content"}}
@@ -457,7 +456,7 @@ def test_owner_can_remove_collaborator(authenticated_client, collaborator_user_a
     # 1. Owner creates a document and shares it
     doc_data = {"title": "Remove Collaborator Doc", "content": {"data": "content"}}
     response_create = client.post("/api/documents/", data=doc_data, content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {owner_access_token}")
-    assert response_create.status_code == 200
+    assert response_create.status_code == 201
     document_id = response_create.json()["id"]
     document = Document.objects.get(id=document_id)
 
@@ -537,7 +536,7 @@ def test_owner_cannot_share_document_with_self(authenticated_client):
         content_type="application/json",
         HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
     )
-    assert response_create.status_code == 200
+    assert response_create.status_code == 201
     document_id = response_create.json()["id"]
     document = Document.objects.get(id=document_id)
 
@@ -733,7 +732,7 @@ def test_document_response_includes_permission_fields(authenticated_client, crea
         content_type="application/json",
         HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
     )
-    assert response.status_code == 200
+    assert response.status_code == 201
     response_data = response.json()
 
     # 驗證擁有者的權限欄位

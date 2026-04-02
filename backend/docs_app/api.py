@@ -114,7 +114,7 @@ class DocumentController:
                 doc.permission = permission
                 doc.can_write = (permission == PermissionLevel.WRITE)
 
-    @http_post("/", response=DocumentSchema)
+    @http_post("/", response={201: DocumentSchema})
     def create_document(self, payload: DocumentCreateSchema):
         """
         創建新文檔
@@ -136,7 +136,7 @@ class DocumentController:
             document.permission = 'owner'
             document.can_write = True
             logger.info(f"用戶 {user.username} 成功創建文檔 {document.id}: {document.title}")
-            return document
+            return 201, document
         except Exception as e:
             logger.error(f"用戶 {user.username} 創建文檔失敗: {str(e)}")
             raise
@@ -290,7 +290,7 @@ class DocumentController:
             })
         return collaborators
 
-    @http_post("/{document_id}/collaborators/", response=CollaboratorSchema)
+    @http_post("/{document_id}/collaborators/", response={200: CollaboratorSchema, 201: CollaboratorSchema})
     def add_collaborator(self, document_id: uuid.UUID, payload: ShareRequestSchema):
         """
         為文檔添加協作者（僅擁有者可以添加）
@@ -316,6 +316,7 @@ class DocumentController:
             existing.permission = payload.permission
             existing.save()
             collab = existing
+            is_new = False
             logger.info(f"用戶 {user.username} 更新協作者 {user_to_add.username} 的權限為 {payload.permission}")
         else:
             collab = DocumentCollaborator.objects.create(
@@ -323,14 +324,16 @@ class DocumentController:
                 user=user_to_add,
                 permission=payload.permission
             )
+            is_new = True
             logger.info(f"用戶 {user.username} 添加協作者 {user_to_add.username} (權限: {payload.permission})")
 
-        return {
+        result = {
             'id': user_to_add.id,
             'username': user_to_add.username,
             'email': user_to_add.email,
             'permission': collab.permission,
         }
+        return (201, result) if is_new else (200, result)
 
     @http_put("/{document_id}/collaborators/{user_id}/", response=CollaboratorSchema)
     def update_collaborator_permission(
