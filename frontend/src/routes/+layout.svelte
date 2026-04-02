@@ -2,14 +2,11 @@
 	import '../app.css';
 	import { SvelteToast } from '@zerodevx/svelte-toast';
 	import { isAuthenticated, logout, user, fetchCurrentUser } from '$lib/auth';
-	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { onMount } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import { FileText, LayoutDashboard, LogIn, UserPlus, LogOut } from '@lucide/svelte';
 
-	// Svelte 5 Runes: $props() with Snippet type for children
 	let { children }: { children: Snippet } = $props();
 
 	function handleLogout() {
@@ -17,29 +14,19 @@
 		goto('/login');
 	}
 
-	// Fetch user info on mount if authenticated (handles page refresh)
-	onMount(() => {
-		if (browser && $isAuthenticated && !$user) {
+	// Fetch user info if authenticated but user data not yet loaded (e.g. page refresh)
+	$effect(() => {
+		if ($isAuthenticated && !$user) {
 			fetchCurrentUser();
 		}
 	});
 
 	// Client-side route guard
-	onMount(() => {
-		const unsubscribe = page.subscribe((p) => {
-			const isAuthRequired = p.route.id?.startsWith('/(protected)');
-			if (isAuthRequired) {
-				const authSub = isAuthenticated.subscribe((auth) => {
-					if (!auth) {
-						goto('/login');
-					}
-				});
-				// Unsubscribe from isAuthenticated to avoid memory leaks
-				return () => authSub();
-			}
-		});
-
-		return () => unsubscribe();
+	$effect(() => {
+		const isAuthRequired = $page.route.id?.startsWith('/(protected)');
+		if (isAuthRequired && !$isAuthenticated) {
+			goto('/login');
+		}
 	});
 </script>
 
@@ -55,7 +42,6 @@
 		<span class="hidden font-semibold sm:inline">SyncDocs</span>
 	</a>
 
-	<!-- Svelte 5: $store auto-subscription still works for stores -->
 	{#if $isAuthenticated}
 		<a
 			href="/dashboard"
@@ -69,7 +55,6 @@
 		{#if $user}
 			<span class="text-primary-700 hidden text-sm md:inline">歡迎, {$user.username}</span>
 		{/if}
-		<!-- Svelte 5: onclick instead of on:click -->
 		<button
 			onclick={handleLogout}
 			class="text-primary-600 hover:bg-primary-50 hover:text-primary-800 flex cursor-pointer items-center gap-1 rounded-lg border-none bg-transparent px-2 py-1.5 transition-all duration-150 sm:gap-1.5 sm:px-3"
@@ -100,7 +85,6 @@
 </nav>
 
 <main class="min-h-screen px-4 pt-24 pb-8">
-	<!-- Svelte 5: {@render children()} instead of <slot /> -->
 	{@render children()}
 </main>
 
