@@ -262,13 +262,15 @@ class CommentController:
             raise HttpError(403, "沒有刪除權限")
 
         comment_id_str = str(comment.id)
+        parent_id_str = str(comment.parent_id) if comment.parent_id else None
         comment.delete()
 
         logger.info(f"用戶 {user.username} 刪除評論 {comment_id_str}")
 
         # 廣播評論刪除事件
         self._broadcast_comment_event(document_id, 'delete', {
-            'comment_id': comment_id_str
+            'comment_id': comment_id_str,
+            'parent_id': parent_id_str
         })
 
         return {"success": True, "message": "評論已刪除"}

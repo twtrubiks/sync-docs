@@ -726,5 +726,6 @@ class DocConsumer(AsyncWebsocketConsumer):
         elif action == 'delete':
             await self.send(text_data=json.dumps({
                 'type': 'comment_delete',
-                'comment_id': event.get('comment_id')
+                'comment_id': event.get('comment_id'),
+                'parent_id': event.get('parent_id')
             }))

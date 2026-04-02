@@ -161,12 +161,15 @@
 			};
 			const newReply = await createComment(documentId, payload);
 
-			// 樂觀更新：立即顯示在展開的回覆列表中（reply_count 由 WebSocket 統一更新，避免 race condition）
+			// 樂觀更新：立即顯示在展開的回覆列表中（去重：WebSocket 廣播可能已先加入）
 			if (expandedReplies[parentId]) {
-				expandedReplies = {
-					...expandedReplies,
-					[parentId]: [...expandedReplies[parentId], newReply]
-				};
+				const existing = expandedReplies[parentId];
+				if (!existing.find((r) => r.id === newReply.id)) {
+					expandedReplies = {
+						...expandedReplies,
+						[parentId]: [...existing, newReply]
+					};
+				}
 			}
 
 			cancelReply();
@@ -208,21 +211,42 @@
 	// ========== 刪除評論 ==========
 	let showDeleteConfirm = $state(false);
 	let pendingDeleteCommentId = $state<string | null>(null);
+	let pendingDeleteParentId = $state<string | null>(null);
 
-	function handleDelete(commentId: string) {
+	/** 從本地狀態移除一則回覆，回傳是否實際移除（用於去重） */
+	function removeReplyFromState(replyId: string, parentId: string): boolean {
+		if (expandedReplies[parentId]) {
+			const filtered = expandedReplies[parentId].filter((r) => r.id !== replyId);
+			if (filtered.length === expandedReplies[parentId].length) return false;
+			expandedReplies = { ...expandedReplies, [parentId]: filtered };
+		}
+		comments = comments.map((c) =>
+			c.id === parentId ? { ...c, reply_count: Math.max(0, c.reply_count - 1) } : c
+		);
+		return true;
+	}
+
+	function handleDelete(commentId: string, parentId: string | null = null) {
 		pendingDeleteCommentId = commentId;
+		pendingDeleteParentId = parentId;
 		showDeleteConfirm = true;
 	}
 
 	async function confirmDeleteComment() {
 		if (!pendingDeleteCommentId) return;
 		const commentId = pendingDeleteCommentId;
+		const parentId = pendingDeleteParentId;
 		pendingDeleteCommentId = null;
+		pendingDeleteParentId = null;
 
 		try {
 			await deleteComment(documentId, commentId);
-			comments = comments.filter((c) => c.id !== commentId);
-			totalComments--;
+			if (parentId) {
+				removeReplyFromState(commentId, parentId);
+			} else {
+				comments = comments.filter((c) => c.id !== commentId);
+				totalComments--;
+			}
 			toastSuccess('評論已刪除');
 		} catch (error) {
 			toastError('刪除評論失敗');
@@ -282,9 +306,14 @@
 		comments = comments.map((c) => (c.id === commentId ? { ...c, content, updated_at } : c));
 	}
 
-	export function removeCommentFromWS(commentId: string) {
-		comments = comments.filter((c) => c.id !== commentId);
-		totalComments--;
+	export function removeCommentFromWS(commentId: string, parentId: string | null) {
+		if (parentId) {
+			if (!removeReplyFromState(commentId, parentId)) return;
+		} else {
+			if (!comments.find((c) => c.id === commentId)) return;
+			comments = comments.filter((c) => c.id !== commentId);
+			totalComments--;
+		}
 	}
 
 	// ========== 格式化時間 ==========
@@ -523,9 +552,21 @@
 														<span class="text-primary-800 text-xs font-medium"
 															>{reply.author_username}</span
 														>
-														<span class="text-primary-400 text-xs"
-															>{formatTime(reply.created_at)}</span
-														>
+														<div class="flex items-center gap-2">
+															<span class="text-primary-400 text-xs"
+																>{formatTime(reply.created_at)}</span
+															>
+															{#if reply.can_delete}
+																<button
+																	type="button"
+																	class="cursor-pointer text-red-400 transition-colors hover:text-red-600"
+																	onclick={() => handleDelete(reply.id, comment.id)}
+																	aria-label="刪除回覆"
+																>
+																	<Trash2 size={12} />
+																</button>
+															{/if}
+														</div>
 													</div>
 													<p class="text-primary-700 mt-1 text-sm whitespace-pre-wrap">
 														{reply.content}

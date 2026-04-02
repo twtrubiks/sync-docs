@@ -348,7 +348,7 @@
 					commentPanel?.updateCommentFromWS(data.comment_id, data.content, data.updated_at);
 					break;
 				case 'comment_delete':
-					commentPanel?.removeCommentFromWS(data.comment_id);
+					commentPanel?.removeCommentFromWS(data.comment_id, data.parent_id ?? null);
 					break;
 			}
 		};
