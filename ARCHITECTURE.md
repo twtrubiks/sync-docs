@@ -394,6 +394,9 @@ backend/
     ├── auth_middleware.py     # WebSocket 認證中間件
     ├── connection_manager.py  # WebSocket 連接管理
     ├── rate_limiter.py        # 消息速率限制
+    ├── pagination.py          # 分頁工具
+    ├── management/commands/   # 管理指令
+    │   └── clear_ws_connections.py  # Redis 連線清理
     └── tests/                 # 測試（pytest）
 ```
 
@@ -413,7 +416,9 @@ frontend/src/
 └── lib/                        # 共享模組
     ├── auth.ts                # 認證工具（API 封裝、Token 管理）
     ├── ai.ts                  # AI API 模組
+    ├── toast.ts               # Toast 通知工具
     ├── api/                   # API 模組
+    │   ├── documents.ts       # 文件 API
     │   ├── versions.ts        # 版本歷史 API
     │   └── comments.ts        # 評論 API
     ├── components/            # 可複用組件
@@ -423,6 +428,8 @@ frontend/src/
     │   ├── VersionHistoryPanel.svelte  # 版本歷史面板
     │   └── CommentPanel.svelte # 評論面板
     └── types/                 # TypeScript 類型定義
+        ├── cursor.ts          # Cursor / Presence 型別
+        └── quill.ts           # Quill / Delta 型別
 ```
 
 ### 數據模型設計
@@ -572,7 +579,7 @@ class DocumentCollaborator(models.Model):
     user = ForeignKey(User, on_delete=CASCADE, related_name='document_collaborations')
     # 設計理由：
     # ✓ 雙向 CASCADE：文檔/用戶刪除時，協作關係也刪除
-    # ✓ unique_together 確保同一用戶只能有一筆協作記錄
+    # ✓ UniqueConstraint 確保同一用戶只能有一筆協作記錄
 
     # ─────────── 權限 ───────────
     permission = CharField(choices=PermissionLevel.choices, default=PermissionLevel.WRITE)
@@ -586,7 +593,9 @@ class DocumentCollaborator(models.Model):
 
     # ─────────── 元數據 ───────────
     class Meta:
-        unique_together = ['document', 'user']
+        constraints = [
+            UniqueConstraint(fields=['document', 'user'], name='unique_document_user'),
+        ]
         indexes = [
             Index(fields=['document', 'user']),  # 權限檢查：can_user_access(), can_user_write()
             Index(fields=['user']),               # 用戶協作列表：GET /api/documents/ 過濾
@@ -641,7 +650,7 @@ class DocumentVersion(models.Model):
     version_number = PositiveIntegerField()
     # 設計理由：
     # ✓ 遞增版本號，方便用戶識別
-    # ✓ unique_together 確保唯一性
+    # ✓ UniqueConstraint 確保唯一性
 
     # ─────────── 時間戳 ───────────
     created_at = DateTimeField(auto_now_add=True)
@@ -649,7 +658,9 @@ class DocumentVersion(models.Model):
     # ─────────── 元數據 ───────────
     class Meta:
         ordering = ['-version_number']
-        unique_together = ['document', 'version_number']
+        constraints = [
+            UniqueConstraint(fields=['document', 'version_number'], name='unique_document_version'),
+        ]
         indexes = [
             Index(fields=['document', '-version_number']),  # GET /api/documents/{id}/versions/ 版本列表
         ]
@@ -802,27 +813,23 @@ export async function get(url: string) {
 
 **為什麼選擇 Quill？**
 
-| 特性 | Quill | TinyMCE | Draft.js |
+| 特性 | Quill | TinyMCE (部分付費) | Tiptap (部分付費) |
 |------|-------|---------|----------|
-| Delta 模型 | ✅ 原生 | ❌ | ⚠️ 複雜 |
-| 即時協作 | ✅ 完美 | ⚠️ 困難 | ✅ 可以 |
-| API 簡潔度 | ✅ | ⚠️ | ❌ |
-| 文檔品質 | ✅ | ✅ | ⚠️ |
-| 學習曲線 | 📈 平緩 | 📈 中等 | 📈 陡峭 |
+| Delta 模型 | 原生支援 | 不支援 | 不支援 |
+| 即時協作 | 適合 | 需付費功能 | 基於 Yjs（完整功能需付費） |
+| API 簡潔度 | 簡潔 | 中等 | 靈活但較複雜 |
+| 文檔品質 | 良好 | 良好 | 良好 |
+| 學習曲線 | 平緩 | 中等 | 中等偏高 |
+| 維護狀態 | 較慢 | 活躍 | 活躍 |
 
 **決策關鍵：**
-- Delta 模型是教學重點
-- 適合協作場景
+- Delta 模型是教學重點，Quill 原生支援 Delta 格式
+- 雖然 Quill 的維護速度較慢，但為了學習 Delta 概念而選用
 - API 友善，易於整合
 
 ### PostgreSQL vs MySQL
 
-**為什麼選擇 PostgreSQL？**
-
-- ✅ JSONField 支援更好（原生 JSON 型別）
-- ✅ 全文搜索能力更強
-- ✅ 擴展性更好
-- ✅ 開源社群更活躍
+選擇 PostgreSQL，主要因為原生 JSONField 支援，適合儲存 Quill Delta 的 JSON 格式內容。
 
 ### Redis vs In-Memory
 
@@ -922,14 +929,14 @@ cursor.execute(f"SELECT * FROM document WHERE owner={user.id}")  # 危險！
 
 **認證失敗處理：**
 - ✅ 連接失敗時發送具體錯誤原因（type: connection_error）
-- ✅ 使用 WebSocket Close Codes (4001-4008)
-- ✅ 支持多種錯誤類型：TOKEN_EXPIRED、PERMISSION_DENIED、DOCUMENT_NOT_FOUND 等
+- ✅ 使用 WebSocket Close Codes (4001-4009)
+- ✅ 支持多種錯誤類型：TOKEN_EXPIRED、PERMISSION_DENIED、DOCUMENT_NOT_FOUND、READ_ONLY_VIOLATION 等
 - ✅ TOKEN_EXPIRED 時自動用 Refresh Token 換取新 Access Token 後重連，而非直接登出
 
 **前端自動重連機制：**
 - ✅ 指數退避 + 隨機抖動（1s → 2s → 4s...上限 30s）
 - ✅ 最多重連 5 次，超過後提示用戶刷新頁面
-- ✅ 永久性錯誤（4001-4008）和正常關閉（1000/1001）不觸發重連
+- ✅ 永久性錯誤（4001-4009）和正常關閉（1000/1001）不觸發重連
 - ✅ 重連前清理舊 socket 防止連線洩漏
 - ✅ 重連成功顯示 Connection restored 提示
 

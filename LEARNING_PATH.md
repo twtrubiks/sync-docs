@@ -26,7 +26,7 @@
 | Svelte / WebSocket | 可選 | 可以邊學邊做 |
 
 推薦學習資源：
-- [Django 官方教學](https://docs.djangoproject.com/zh-hans/6.0/intro/tutorial01/)
+- [Django 官方教學](https://docs.djangoproject.com/zh-hans/stable/intro/tutorial01/)
 - [Svelte 互動式教學](https://svelte.dev/tutorial)
 
 ---
@@ -238,7 +238,7 @@ Document.objects.filter(owner=user)
   - Middleware 模式：`JWTAuthMiddleware` 解析 subprotocol 並驗證 token
   - TOKEN_EXPIRED 處理：前端收到 4002 關閉碼時，先嘗試用 Refresh Token 換新 Access Token 再重連，而非直接登出
 
-**4.7 WebSocket 自動重連機制**
+**4.4 WebSocket 自動重連機制**
 - 閱讀檔案：`frontend/src/routes/(protected)/docs/[document_id]/+page.svelte` 的 `connectWebSocket`、`getReconnectDelay` 方法
 - 關鍵概念：
   - 指數退避 + 隨機抖動（Exponential Backoff + Jitter）避免伺服器雪崩
@@ -246,18 +246,18 @@ Document.objects.filter(owner=user)
   - 暫時性錯誤自動重連，最多 5 次
   - 重連前清理舊 socket 防止連線洩漏
 
-**4.4 Delta 同步邏輯**
+**4.5 Delta 同步邏輯**
 - 閱讀：`backend/docs_app/consumers.py` 的 `receive` 和 `doc_update` 方法
 - 閱讀：`frontend/src/routes/(protected)/docs/[document_id]/+page.svelte` WebSocket 部分
 - 關鍵概念：
   - 避免回聲（Echo Prevention）：不發送回給原始發送者
   - `source !== 'user'`：只發送用戶操作
 
-**4.5 保存與同步**
+**4.6 保存與同步**
 - 閱讀：`backend/docs_app/api.py` 的 `_broadcast_document_saved` 方法
 - 理解 HTTP API 和 WebSocket 的配合
 
-**4.6 游標與在線狀態（Cursor Presence）**
+**4.7 游標與在線狀態（Cursor Presence）**
 - 閱讀檔案：`backend/docs_app/consumers.py` 的 `handle_cursor_move`、`add_user_to_presence`、`remove_user_from_presence` 方法
 - 閱讀檔案：`frontend/src/lib/components/QuillEditor.svelte` 的 `setCursor`、`removeCursor` 方法
 - 關鍵概念：
