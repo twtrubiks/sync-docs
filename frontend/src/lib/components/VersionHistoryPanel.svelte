@@ -24,7 +24,7 @@
 	let selectedVersion = $state<DocumentVersion | null>(null);
 	let previewContent = $state<Record<string, unknown> | null>(null);
 	let loadingPreview = $state(false);
-	let previewContainer: HTMLElement | undefined;
+	let previewContainer: HTMLElement | undefined = $state();
 	let previewQuill: import('quill').default | null = null;
 	let restoring = $state(false);
 	let currentPage = $state(1);
