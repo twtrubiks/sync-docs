@@ -146,6 +146,28 @@ docker compose -f docker-compose.yml up -d
 * 根目錄 `.env` → Docker Compose 讀取 → 注入到 backend container
 * `frontend/.env` → 掛載到 container → SvelteKit 直接讀取
 
+#### AI 供應商設定（摘要 / 潤稿 / 校對）
+
+AI 功能透過 Pydantic AI 串接，供應商可在根目錄 `.env` 切換：
+
+```bash
+# 使用 NVIDIA NIM（預設）— 取得 key：https://build.nvidia.com/
+AI_PROVIDER=nvidia
+NVIDIA_API_KEY=your_nvidia_api_key_here
+
+# 或改用 Google Gemini — 取得 key：https://aistudio.google.com/
+AI_PROVIDER=gemini
+GOOGLE_API_KEY=your_google_api_key_here
+```
+
+> ⚠️ **改完 `.env`（例如切換供應商或填入 key）後，必須「重建」backend container 才會生效**，只 `restart` 不會重讀 `.env`：
+>
+> ```bash
+> docker compose up -d --force-recreate backend
+> ```
+>
+> 原因：環境變數是在 container「建立時」由 Compose 從 `.env` 代入並寫死的。若沿用舊 container，後端會讀到舊值（常見症狀：明明已設定 key，AI 功能仍顯示「AI 服務未配置」）。
+
 ### 本地開發 (不使用 Docker)
 
 > **⚠️ 注意**：本地開發需要自行安裝並啟動 PostgreSQL 和 Redis 服務。

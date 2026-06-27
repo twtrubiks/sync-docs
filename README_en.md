@@ -146,6 +146,28 @@ docker compose -f docker-compose.yml up -d
 * Root `.env` → Read by Docker Compose → Injected into backend container
 * `frontend/.env` → Mounted to container → Read directly by SvelteKit
 
+#### AI Provider Configuration (Summarize / Polish / Proofread)
+
+AI features are powered by Pydantic AI; the provider is switchable in the root `.env`:
+
+```bash
+# Use NVIDIA NIM (default) — get a key: https://build.nvidia.com/
+AI_PROVIDER=nvidia
+NVIDIA_API_KEY=your_nvidia_api_key_here
+
+# Or switch to Google Gemini — get a key: https://aistudio.google.com/
+AI_PROVIDER=gemini
+GOOGLE_API_KEY=your_google_api_key_here
+```
+
+> ⚠️ **After changing `.env` (e.g. switching provider or filling in a key), you must RECREATE the backend container for it to take effect** — a plain `restart` does NOT re-read `.env`:
+>
+> ```bash
+> docker compose up -d --force-recreate backend
+> ```
+>
+> Why: environment variables are substituted from `.env` and baked in when the container is *created*. Reusing the old container makes the backend read stale values (common symptom: the key is set but AI features still report "AI 服務未配置" / "AI service not configured").
+
 ### Local Development (Without Docker)
 
 > **⚠️ Note**: Local development requires you to install and start PostgreSQL and Redis services yourself.
