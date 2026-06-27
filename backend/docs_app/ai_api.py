@@ -10,6 +10,8 @@ from ninja_extra.permissions import IsAuthenticated
 from .schemas import (
     AIProcessRequest,
     AIProcessResponse,
+    AskRequest,
+    AskResponse,
     MetadataRequest,
     MetadataResponse,
     ProofreadRequest,
@@ -117,3 +119,26 @@ class AIController:
             return MetadataResponse(success=False, error=str(e))
         except RuntimeError as e:
             return MetadataResponse(success=False, error=str(e))
+
+    @http_post("/ask", response=AskResponse)
+    async def ask_document(self, payload: AskRequest):
+        """AI 文件問答（依據整份文件內容回答問題）"""
+        user = self.context.request.auth
+
+        # 速率限制檢查（與 /process 共用同一額度）
+        rate_key = f"ai:{user.id}"
+        if not ai_rate_limiter.is_allowed(rate_key, AI_RATE_LIMIT_REQUESTS, AI_RATE_LIMIT_WINDOW):
+            logger.warning(f"AI rate limit exceeded: user={user.id}")
+            return AskResponse(success=False, error="請求過於頻繁，請稍後再試")
+
+        try:
+            answer = await ai_service.ask(payload.question, payload.document_text)
+
+            logger.info(f"AI ask: user={user.id}, question_len={len(payload.question)}, "
+                       f"doc_len={len(payload.document_text)}, answer_len={len(answer)}")
+
+            return AskResponse(success=True, answer=answer)
+        except ValueError as e:
+            return AskResponse(success=False, error=str(e))
+        except RuntimeError as e:
+            return AskResponse(success=False, error=str(e))

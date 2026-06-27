@@ -9,7 +9,13 @@ import pytest
 from unittest.mock import patch, MagicMock
 from django.test import override_settings
 from pydantic import ValidationError
-from pydantic_ai.messages import ModelResponse, TextPart, UserPromptPart
+from pydantic_ai.messages import (
+    ModelResponse,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
@@ -17,6 +23,7 @@ from docs_app import ai_service as ai_service_module
 from docs_app.ai_service import (
     AIService,
     _get_agent,
+    _get_doc_agent,
     _get_metadata_agent,
     _get_model,
     _get_proofread_agent,
@@ -41,11 +48,13 @@ def _reset_ai_globals():
     ai_service_module._agent = None
     ai_service_module._proofread_agent = None
     ai_service_module._metadata_agent = None
+    ai_service_module._doc_agent = None
     yield
     ai_service_module._model = None
     ai_service_module._agent = None
     ai_service_module._proofread_agent = None
     ai_service_module._metadata_agent = None
+    ai_service_module._doc_agent = None
 
 
 class TestAIService:
@@ -212,6 +221,56 @@ class TestMetadata:
         """測試 API Key 未配置錯誤"""
         with pytest.raises(RuntimeError, match="AI 服務未配置"):
             await AIService().generate_metadata('文字')
+
+
+class TestDocQA:
+    """文件問答測試（deps_type=DocDeps + @agent.tool，以 TestModel/FunctionModel override，不打 API）"""
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_ask_returns_answer(self):
+        """end-to-end 跑通 deps + 工具，回傳字串答案；agent 對外曝露 get_document_text 工具"""
+        model = TestModel()
+        with _get_doc_agent().override(model=model):
+            answer = await AIService().ask('這份文件在說什麼？', '介紹 Docker 的文件')
+
+        assert isinstance(answer, str)
+        tool_names = [t.name for t in model.last_model_request_parameters.function_tools]
+        assert tool_names == ['get_document_text']
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_tool_provides_injected_document_text(self):
+        """依賴注入：模型呼叫工具後，工具回傳的文件內容正是注入的 document_text"""
+        captured = {}
+
+        async def fake_model(messages, info):
+            # 工具已回傳 → 擷取其內容並結束
+            for message in messages:
+                for part in message.parts:
+                    if isinstance(part, ToolReturnPart) and part.tool_name == 'get_document_text':
+                        captured['doc'] = str(part.content)
+                        return ModelResponse(parts=[TextPart('已根據文件回答')])
+            # 尚未呼叫工具 → 先呼叫工具
+            return ModelResponse(parts=[
+                ToolCallPart(tool_name='get_document_text', args={}, tool_call_id='c1')
+            ])
+
+        with _get_doc_agent().override(model=FunctionModel(fake_model)):
+            answer = await AIService().ask('文件重點？', '這份文件介紹 Docker 容器化技術')
+
+        assert answer == '已根據文件回答'
+        assert captured['doc'] == '這份文件介紹 Docker 容器化技術'
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_empty_question_error(self):
+        """測試空問題錯誤"""
+        with pytest.raises(ValueError, match="Question cannot be empty"):
+            await AIService().ask('', '文件內容')
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='')
+    async def test_not_configured_error(self):
+        """測試 API Key 未配置錯誤"""
+        with pytest.raises(RuntimeError, match="AI 服務未配置"):
+            await AIService().ask('問題', '文件內容')
 
 
 class TestAIRateLimiter:

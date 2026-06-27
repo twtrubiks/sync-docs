@@ -7,10 +7,11 @@ process(action, text) 介面與回傳純文字維持不變，向下相容既有 
 """
 
 import logging
+from dataclasses import dataclass
 
 from django.conf import settings
 from httpx import AsyncClient
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models import Model
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
@@ -38,6 +39,16 @@ METADATA_SYSTEM_PROMPT = (
     "一句話摘要（summary，繁體中文）、3-5 個主題標籤（tags）、"
     "主要語言代碼（language，如 zh-Hant / en）、預估閱讀時間分鐘數（reading_time）。"
 )
+DOC_QA_SYSTEM_PROMPT = (
+    "你是文件問答助手。請先呼叫 get_document_text 工具取得整份文件內容，"
+    "再根據文件內容以繁體中文回答使用者問題；若文件中找不到答案，請誠實說明。"
+)
+
+
+@dataclass
+class DocDeps:
+    """文件問答的依賴注入：整份文件純文字（供 agent 工具讀取）。"""
+    document_text: str
 
 # Prompt 模板
 PROMPTS = {
@@ -68,6 +79,7 @@ _model: Model | None = None
 _agent: Agent | None = None
 _proofread_agent: Agent | None = None
 _metadata_agent: Agent | None = None
+_doc_agent: Agent | None = None
 
 
 def _get_api_key() -> str:
@@ -154,6 +166,25 @@ def _get_metadata_agent() -> Agent:
             system_prompt=METADATA_SYSTEM_PROMPT,
         )
     return _metadata_agent
+
+
+def _get_doc_agent() -> Agent:
+    """惰性建立文件問答 agent（deps_type=DocDeps + 工具讀取文件內容）。"""
+    global _doc_agent
+    if _doc_agent is None:
+        agent = Agent(
+            _get_model(),
+            deps_type=DocDeps,
+            system_prompt=DOC_QA_SYSTEM_PROMPT,
+        )
+
+        @agent.tool
+        async def get_document_text(ctx: RunContext[DocDeps]) -> str:
+            """取得整份文件純文字供回答參考（依賴由 RunContext 注入）。"""
+            return ctx.deps.document_text
+
+        _doc_agent = agent
+    return _doc_agent
 
 
 class AIService:
@@ -244,6 +275,34 @@ class AIService:
             raise RuntimeError("AI 服務暫時無法使用")
         except Exception as e:
             logger.error(f"AI metadata unexpected error: {e}")
+            raise RuntimeError(f"AI 處理失敗：{str(e)}")
+
+    async def ask(self, question: str, document_text: str = "") -> str:
+        """根據整份文件回答問題（agent 透過工具 + 依賴注入讀取文件內容）。"""
+        if not question.strip():
+            raise ValueError("Question cannot be empty")
+
+        if not _get_api_key():
+            raise RuntimeError("AI 服務未配置")
+
+        # 限制文件長度（避免 token 過多）
+        max_chars = 5000
+        if len(document_text) > max_chars:
+            document_text = document_text[:max_chars] + "..."
+
+        try:
+            result = await _get_doc_agent().run(
+                question, deps=DocDeps(document_text=document_text)
+            )
+            return result.output
+        except ModelHTTPError as e:
+            if getattr(e, "status_code", None) == 429:
+                logger.warning("AI API quota exhausted")
+                raise RuntimeError("API 配額已用盡，請稍後再試")
+            logger.error(f"AI API error: {e}")
+            raise RuntimeError("AI 服務暫時無法使用")
+        except Exception as e:
+            logger.error(f"AI ask unexpected error: {e}")
             raise RuntimeError(f"AI 處理失敗：{str(e)}")
 
 

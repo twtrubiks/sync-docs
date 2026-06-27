@@ -280,6 +280,19 @@ class MetadataResponse(Schema):
     error: Optional[str] = None
 
 
+class AskRequest(Schema):
+    """AI 文件問答請求"""
+    question: str
+    document_text: str = ""  # 整份文件純文字（供 agent 透過工具讀取；最大長度在 ai_service.py 處理）
+
+
+class AskResponse(Schema):
+    """AI 文件問答回應"""
+    success: bool
+    answer: Optional[str] = None
+    error: Optional[str] = None
+
+
 # ============ 評論相關 Schema ============
 
 class CommentCreateSchema(Schema):
