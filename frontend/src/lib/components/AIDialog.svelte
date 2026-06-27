@@ -1,20 +1,30 @@
 <script lang="ts">
-	import { processWithAI, proofreadWithAI, type ProofreadResult } from '$lib/ai';
+	import { proofreadWithAI, type ProofreadResult } from '$lib/ai';
 	import { toastError, toastWarning } from '$lib/toast';
-	import { X, Sparkles, FileText, WandSparkles, Check, SpellCheck } from '@lucide/svelte';
+	import { X, Sparkles, FileText, WandSparkles, Check, SpellCheck, Square } from '@lucide/svelte';
 
 	let {
 		isOpen = $bindable(false),
 		selectedText = '',
-		onApply = (_text: string) => {}
+		onApply = (_text: string) => {},
+		onStream = (_action: 'summarize' | 'polish', _text: string): boolean => false,
+		onCancelStream = () => {},
+		streaming = false,
+		streamText = ''
 	}: {
 		isOpen: boolean;
 		selectedText: string;
 		onApply: (text: string) => void;
+		// summarize/polish 走 WebSocket 串流（由父層提供，proofread 不需要）：
+		// onStream 回傳是否成功啟動（連線中斷時為 false）
+		onStream?: (action: 'summarize' | 'polish', text: string) => boolean;
+		onCancelStream?: () => void;
+		streaming?: boolean; // 是否正在串流（由父層提供）
+		streamText?: string; // 逐字累積的串流結果（由父層提供）
 	} = $props();
 
+	// proofread（校對）走 HTTP，自有 loading 狀態；summarize/polish 串流狀態由父層提供
 	let loading = $state(false);
-	let result = $state('');
 	let currentAction = $state<'summarize' | 'polish' | 'proofread' | null>(null);
 
 	// 校對狀態：結構化結果 + 逐項套用後的工作文字
@@ -22,35 +32,25 @@
 	let workingText = $state('');
 	let appliedIndexes = $state<number[]>([]);
 
-	async function handleAction(action: 'summarize' | 'polish') {
+	// summarize/polish：透過 WebSocket 串流逐字輸出（打字機效果）
+	function handleAction(action: 'summarize' | 'polish') {
 		if (!selectedText.trim()) {
 			toastWarning('Please select text first');
 			return;
 		}
 
-		loading = true;
 		currentAction = action;
-		result = '';
 		proofreadResult = null;
 
-		try {
-			const response = await processWithAI({ action, text: selectedText });
-
-			if (response.success) {
-				result = response.result;
-			} else {
-				toastError(response.error || 'AI processing failed');
-			}
-		} catch (error: unknown) {
-			// Handle timeout and other errors
-			if (error instanceof Error && error.name === 'AbortError') {
-				toastError('Request timed out, please try again');
-			} else {
-				toastError('AI processing request failed');
-			}
-		} finally {
-			loading = false;
+		// 交由父層送出 WebSocket 串流請求；無法啟動（連線中斷）時還原狀態
+		const started = onStream(action, selectedText);
+		if (!started) {
+			currentAction = null;
 		}
+	}
+
+	function handleStopStream() {
+		onCancelStream();
 	}
 
 	async function handleProofread() {
@@ -61,7 +61,6 @@
 
 		loading = true;
 		currentAction = 'proofread';
-		result = '';
 		proofreadResult = null;
 		appliedIndexes = [];
 
@@ -99,9 +98,9 @@
 		appliedIndexes = [...appliedIndexes, index];
 	}
 
-	function handleApply() {
-		if (result) {
-			onApply(result);
+	function handleApplyStream() {
+		if (streamText) {
+			onApply(streamText);
 			close();
 		}
 	}
@@ -113,8 +112,12 @@
 	}
 
 	function close() {
+		// 關閉時若仍在串流，請父層取消（避免背景任務繼續產生 token）
+		if (streaming) {
+			onCancelStream();
+		}
 		isOpen = false;
-		result = '';
+		loading = false;
 		currentAction = null;
 		proofreadResult = null;
 		workingText = '';
@@ -198,7 +201,7 @@
 						: 'border-primary-200 text-primary-600 hover:border-cta-300 hover:bg-cta-50'}
                  disabled:cursor-not-allowed disabled:opacity-50"
 					onclick={() => handleAction('summarize')}
-					disabled={loading || !selectedText.trim()}
+					disabled={loading || streaming || !selectedText.trim()}
 				>
 					<FileText size={18} />
 					摘要
@@ -210,7 +213,7 @@
 						: 'border-primary-200 text-primary-600 hover:border-cta-300 hover:bg-cta-50'}
                  disabled:cursor-not-allowed disabled:opacity-50"
 					onclick={() => handleAction('polish')}
-					disabled={loading || !selectedText.trim()}
+					disabled={loading || streaming || !selectedText.trim()}
 				>
 					<WandSparkles size={18} />
 					潤稿
@@ -222,7 +225,7 @@
 						: 'border-primary-200 text-primary-600 hover:border-cta-300 hover:bg-cta-50'}
                  disabled:cursor-not-allowed disabled:opacity-50"
 					onclick={handleProofread}
-					disabled={loading || !selectedText.trim()}
+					disabled={loading || streaming || !selectedText.trim()}
 				>
 					<SpellCheck size={18} />
 					校對
@@ -284,15 +287,22 @@
 						</div>
 					{/if}
 				</div>
-			{:else if result}
+			{:else if (currentAction === 'summarize' || currentAction === 'polish') && streaming && !streamText}
+				<div class="flex items-center justify-center py-8">
+					<div
+						class="border-cta-200 border-t-cta-500 h-8 w-8 animate-spin rounded-full border-3"
+					></div>
+					<span class="text-primary-600 ml-3">AI 生成中...</span>
+				</div>
+			{:else if (currentAction === 'summarize' || currentAction === 'polish') && streamText}
 				<div>
 					<span class="text-primary-700 mb-2 block text-sm font-medium">
-						{actionLabels[currentAction!]}
+						{actionLabels[currentAction]}
 					</span>
 					<div
 						class="border-cta-200 bg-cta-50 text-primary-800 max-h-48 overflow-y-auto rounded-lg border p-4 text-sm whitespace-pre-wrap"
 					>
-						{result}
+						{streamText}{#if streaming}<span class="text-cta-500 animate-pulse">▋</span>{/if}
 					</div>
 				</div>
 			{/if}
@@ -316,7 +326,17 @@
 					套用變更到文件
 				</button>
 			</div>
-		{:else if result}
+		{:else if (currentAction === 'summarize' || currentAction === 'polish') && streaming}
+			<div class="border-primary-200 flex justify-end gap-3 border-t p-4">
+				<button
+					class="border-primary-300 text-primary-700 hover:bg-primary-50 flex cursor-pointer items-center gap-2 rounded-lg border px-4 py-2 font-medium transition-colors"
+					onclick={handleStopStream}
+				>
+					<Square size={16} />
+					停止生成
+				</button>
+			</div>
+		{:else if (currentAction === 'summarize' || currentAction === 'polish') && streamText}
 			<div class="border-primary-200 flex justify-end gap-3 border-t p-4">
 				<button
 					class="border-primary-300 text-primary-700 hover:bg-primary-50 cursor-pointer rounded-lg border px-4 py-2 font-medium transition-colors"
@@ -326,7 +346,7 @@
 				</button>
 				<button
 					class="bg-cta-500 hover:bg-cta-600 flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 font-medium text-white transition-colors"
-					onclick={handleApply}
+					onclick={handleApplyStream}
 				>
 					<Check size={18} />
 					套用結果

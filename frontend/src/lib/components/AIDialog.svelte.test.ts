@@ -3,9 +3,8 @@ import '@testing-library/jest-dom/vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import AIDialog from './AIDialog.svelte';
 
-// Mock AI API
+// Mock AI API（summarize/polish 改走 WebSocket 串流，僅 proofread 仍用 HTTP）
 vi.mock('$lib/ai', () => ({
-	processWithAI: vi.fn(),
 	proofreadWithAI: vi.fn()
 }));
 
@@ -21,7 +20,7 @@ vi.mock('$app/environment', () => ({
 	browser: true
 }));
 
-import { processWithAI, proofreadWithAI } from '$lib/ai';
+import { proofreadWithAI } from '$lib/ai';
 import { toastError } from '$lib/toast';
 
 describe('AIDialog', () => {
@@ -84,161 +83,76 @@ describe('AIDialog', () => {
 		expect(polishBtn).not.toBeDisabled();
 	});
 
-	it('should show loading state when processing', async () => {
-		vi.mocked(processWithAI).mockImplementation(
-			() => new Promise(() => {}) // Never resolves
-		);
+	// summarize/polish 改走 WebSocket 串流：透過 onStream callback + streaming/streamText props
+	const streamProps = (overrides = {}) => ({
+		isOpen: true,
+		selectedText: 'Test text',
+		onApply: vi.fn(),
+		onStream: vi.fn(() => true),
+		onCancelStream: vi.fn(),
+		streaming: false,
+		streamText: '',
+		...overrides
+	});
 
+	it('should call onStream with correct params for summarize', async () => {
+		const onStream = vi.fn(() => true);
 		render(AIDialog, {
-			props: {
-				isOpen: true,
-				selectedText: 'Test text',
-				onApply: vi.fn()
-			}
+			props: streamProps({ selectedText: 'Test text to summarize', onStream })
 		});
 
 		await fireEvent.click(screen.getByText('摘要'));
 
-		expect(screen.getByText('AI 處理中...')).toBeInTheDocument();
+		expect(onStream).toHaveBeenCalledWith('summarize', 'Test text to summarize');
 	});
 
-	it('should show result when API succeeds', async () => {
-		vi.mocked(processWithAI).mockResolvedValue({
-			success: true,
-			result: 'AI result text',
-			action: 'summarize'
-		});
-
+	it('should call onStream with correct params for polish', async () => {
+		const onStream = vi.fn(() => true);
 		render(AIDialog, {
-			props: {
-				isOpen: true,
-				selectedText: 'Test text',
-				onApply: vi.fn()
-			}
-		});
-
-		await fireEvent.click(screen.getByText('摘要'));
-
-		await waitFor(() => {
-			expect(screen.getByText('AI result text')).toBeInTheDocument();
-			expect(screen.getByText('套用結果')).toBeInTheDocument();
-		});
-	});
-
-	it('should show error toast when API fails', async () => {
-		vi.mocked(processWithAI).mockResolvedValue({
-			success: false,
-			result: '',
-			action: 'summarize',
-			error: 'Test error'
-		});
-
-		render(AIDialog, {
-			props: {
-				isOpen: true,
-				selectedText: 'Test text',
-				onApply: vi.fn()
-			}
-		});
-
-		await fireEvent.click(screen.getByText('摘要'));
-
-		await waitFor(() => {
-			expect(toastError).toHaveBeenCalledWith('Test error');
-		});
-	});
-
-	it('should handle timeout error', async () => {
-		const abortError = new Error('Aborted');
-		abortError.name = 'AbortError';
-		vi.mocked(processWithAI).mockRejectedValue(abortError);
-
-		render(AIDialog, {
-			props: {
-				isOpen: true,
-				selectedText: 'Test text',
-				onApply: vi.fn()
-			}
-		});
-
-		await fireEvent.click(screen.getByText('摘要'));
-
-		await waitFor(() => {
-			expect(toastError).toHaveBeenCalledWith('Request timed out, please try again');
-		});
-	});
-
-	it('should call onApply when 套用結果 is clicked', async () => {
-		const onApply = vi.fn();
-		vi.mocked(processWithAI).mockResolvedValue({
-			success: true,
-			result: 'AI result text',
-			action: 'summarize'
-		});
-
-		render(AIDialog, {
-			props: {
-				isOpen: true,
-				selectedText: 'Test text',
-				onApply
-			}
-		});
-
-		await fireEvent.click(screen.getByText('摘要'));
-
-		await waitFor(() => {
-			expect(screen.getByText('套用結果')).toBeInTheDocument();
-		});
-
-		await fireEvent.click(screen.getByText('套用結果'));
-
-		expect(onApply).toHaveBeenCalledWith('AI result text');
-	});
-
-	it('should call processWithAI with correct parameters for summarize', async () => {
-		vi.mocked(processWithAI).mockResolvedValue({
-			success: true,
-			result: 'Summary result',
-			action: 'summarize'
-		});
-
-		render(AIDialog, {
-			props: {
-				isOpen: true,
-				selectedText: 'Test text to summarize',
-				onApply: vi.fn()
-			}
-		});
-
-		await fireEvent.click(screen.getByText('摘要'));
-
-		expect(processWithAI).toHaveBeenCalledWith({
-			action: 'summarize',
-			text: 'Test text to summarize'
-		});
-	});
-
-	it('should call processWithAI with correct parameters for polish', async () => {
-		vi.mocked(processWithAI).mockResolvedValue({
-			success: true,
-			result: 'Polished result',
-			action: 'polish'
-		});
-
-		render(AIDialog, {
-			props: {
-				isOpen: true,
-				selectedText: 'Test text to polish',
-				onApply: vi.fn()
-			}
+			props: streamProps({ selectedText: 'Test text to polish', onStream })
 		});
 
 		await fireEvent.click(screen.getByText('潤稿'));
 
-		expect(processWithAI).toHaveBeenCalledWith({
-			action: 'polish',
-			text: 'Test text to polish'
+		expect(onStream).toHaveBeenCalledWith('polish', 'Test text to polish');
+	});
+
+	it('should show streaming loading state before first chunk', async () => {
+		const { rerender } = render(AIDialog, { props: streamProps() });
+
+		await fireEvent.click(screen.getByText('摘要'));
+		// 父層開始串流但尚無 chunk
+		await rerender(streamProps({ streaming: true }));
+
+		expect(screen.getByText('AI 生成中...')).toBeInTheDocument();
+	});
+
+	it('should render streamed text and apply it', async () => {
+		const onApply = vi.fn();
+		const { rerender } = render(AIDialog, { props: streamProps({ onApply }) });
+
+		await fireEvent.click(screen.getByText('摘要'));
+		// 串流完成：父層提供完整結果
+		await rerender(streamProps({ onApply, streaming: false, streamText: 'AI 串流結果' }));
+
+		await waitFor(() => {
+			expect(screen.getByText('AI 串流結果')).toBeInTheDocument();
+			expect(screen.getByText('套用結果')).toBeInTheDocument();
 		});
+
+		await fireEvent.click(screen.getByText('套用結果'));
+		expect(onApply).toHaveBeenCalledWith('AI 串流結果');
+	});
+
+	it('should request cancel when 停止生成 is clicked', async () => {
+		const onCancelStream = vi.fn();
+		const { rerender } = render(AIDialog, { props: streamProps({ onCancelStream }) });
+
+		await fireEvent.click(screen.getByText('摘要'));
+		await rerender(streamProps({ onCancelStream, streaming: true, streamText: '部分結果' }));
+
+		await fireEvent.click(screen.getByText('停止生成'));
+		expect(onCancelStream).toHaveBeenCalled();
 	});
 
 	it('should call proofreadWithAI with selected text', async () => {

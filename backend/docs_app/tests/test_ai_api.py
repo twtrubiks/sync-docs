@@ -111,6 +111,35 @@ class TestAIService:
         # 送進 agent 的 prompt 應含截斷省略號
         assert '...' in captured['prompt']
 
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_process_stream_yields_chunks(self):
+        """串流摘要：逐塊 yield 的文字 delta 拼接後等於完整輸出"""
+        with _get_agent().override(model=TestModel(custom_output_text="這是串流摘要")):
+            chunks = [c async for c in AIService().process_stream('summarize', '測試文字')]
+
+        assert ''.join(chunks) == "這是串流摘要"
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_process_stream_empty_text_error(self):
+        """串流：空文字錯誤（迭代時拋出）"""
+        with pytest.raises(ValueError, match="Text cannot be empty"):
+            async for _ in AIService().process_stream('summarize', ''):
+                pass
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_process_stream_invalid_action_error(self):
+        """串流：無效操作錯誤"""
+        with pytest.raises(ValueError, match="Unknown action"):
+            async for _ in AIService().process_stream('invalid', '文字'):
+                pass
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='')
+    async def test_process_stream_not_configured_error(self):
+        """串流：API Key 未配置錯誤"""
+        with pytest.raises(RuntimeError, match="AI 服務未配置"):
+            async for _ in AIService().process_stream('summarize', '文字'):
+                pass
+
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='nv-key')
     def test_nvidia_builds_openai_model(self):
         """nvidia 供應商建立 OpenAIChatModel（不打 API）"""

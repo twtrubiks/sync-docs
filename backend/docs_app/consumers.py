@@ -9,15 +9,18 @@ import json
 import logging
 import time
 
+from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.conf import settings
 from pydantic import ValidationError as PydanticValidationError
 from .models import Document, DocumentCollaborator, PermissionLevel
-from .schemas import WebSocketMessageSchema, CursorMoveMessage
+from .schemas import WebSocketMessageSchema, CursorMoveMessage, AIStreamMessage
 from .auth_middleware import AuthErrorType
 from .connection_manager import connection_manager
 from .rate_limiter import rate_limiter
+from .ai_service import ai_service
+from .ai_rate_limiter import ai_rate_limiter
 from .redis_pool import get_async_redis
 
 # 獲取日誌記錄器
@@ -29,6 +32,10 @@ MAX_OPS_COUNT = getattr(settings, 'WEBSOCKET_MAX_OPS_COUNT', 1000)
 
 # 心跳間隔（秒）- 用於刷新連接 TTL
 HEARTBEAT_INTERVAL = getattr(settings, 'WEBSOCKET_HEARTBEAT_INTERVAL', 120)  # 2 分鐘
+
+# AI 串流速率限制（與 HTTP /ai/process 共用同一 Redis 額度鍵 ai:{user_id}，每次串流算一次）
+AI_STREAM_RATE_LIMIT_REQUESTS = 10
+AI_STREAM_RATE_LIMIT_WINDOW = 60
 
 # Lua 腳本：原子性添加用戶到在線列表
 ADD_USER_SCRIPT = """
@@ -340,6 +347,15 @@ class DocConsumer(AsyncWebsocketConsumer):
             except asyncio.CancelledError:
                 pass
 
+        # 取消進行中的 AI 串流任務，避免斷線後仍嘗試送資料
+        ai_stream_task = getattr(self, '_ai_stream_task', None)
+        if ai_stream_task is not None and not ai_stream_task.done():
+            ai_stream_task.cancel()
+            try:
+                await ai_stream_task
+            except asyncio.CancelledError:
+                pass
+
         # 移除連接記錄
         if hasattr(self, 'user') and self.user and self.user.is_authenticated:
             await connection_manager.remove_connection(
@@ -399,6 +415,15 @@ class DocConsumer(AsyncWebsocketConsumer):
         # cursor_move 消息：不計入速率限制（由前端 throttle 控制）
         if msg_type == 'cursor_move':
             await self.handle_cursor_move(text_data_json)
+            return
+
+        # AI 串流消息：摘要/潤稿逐字回傳（只回發送者本人，不經 delta 驗證；
+        # 與 HTTP /ai/process 一致，僅需認證、不要求寫入權限）
+        if msg_type == 'ai_stream':
+            await self.handle_ai_stream(text_data_json)
+            return
+        if msg_type == 'ai_stream_cancel':
+            await self.handle_ai_stream_cancel()
             return
 
         # Step 0b: 檢查寫入權限（非 cursor_move 消息）
@@ -492,6 +517,93 @@ class DocConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps(response))
         except Exception as e:
             logger.error(f"發送錯誤消息失敗: {str(e)}")
+
+    # ========== AI 串流（摘要/潤稿，逐字回傳給發送者本人） ==========
+
+    async def _send_ai_stream_error(self, message: str):
+        """向發送者回傳 AI 串流錯誤（獨立於一般 error 通道，方便前端對話框重置狀態）"""
+        try:
+            await self.send(text_data=json.dumps({
+                'type': 'ai_stream_error',
+                'message': message
+            }))
+        except Exception as e:
+            logger.error(f"發送 AI 串流錯誤失敗: {str(e)}")
+
+    async def handle_ai_stream(self, data):
+        """
+        處理 AI 串流請求：驗證 → 速率限制 → 啟動可取消的背景串流任務。
+
+        chunk 只回傳給發送者本人（self.send），不經 group_send，
+        複用既有連線的認證；速率限制與 HTTP /ai/process 共用同一額度。
+        """
+        username = getattr(self.user, 'username', 'Unknown')
+
+        # 同一連線同時間只允許一個串流，避免並發佔用資源
+        existing = getattr(self, '_ai_stream_task', None)
+        if existing is not None and not existing.done():
+            await self._send_ai_stream_error('已有 AI 串流進行中，請稍候')
+            return
+
+        # 驗證請求格式（action + text）
+        try:
+            message = AIStreamMessage(**data)
+        except PydanticValidationError as e:
+            error_messages = "; ".join([err['msg'] for err in e.errors()])
+            logger.warning(f"用戶 {username} 發送了無效的 AI 串流請求: {error_messages}")
+            await self._send_ai_stream_error(f"Invalid AI stream request: {error_messages}")
+            return
+
+        # 速率限制（同步限流器以 sync_to_async 包裝，避免阻塞事件迴圈）
+        allowed = await sync_to_async(ai_rate_limiter.is_allowed)(
+            f"ai:{self.user.id}",
+            AI_STREAM_RATE_LIMIT_REQUESTS,
+            AI_STREAM_RATE_LIMIT_WINDOW,
+        )
+        if not allowed:
+            logger.warning(f"AI 串流速率限制: user={self.user.id}")
+            await self._send_ai_stream_error('請求過於頻繁，請稍後再試')
+            return
+
+        # 啟動可取消的背景串流任務
+        self._ai_stream_task = asyncio.create_task(
+            self._run_ai_stream(message.action, message.text)
+        )
+
+    async def _run_ai_stream(self, action: str, text: str):
+        """實際執行串流：逐塊送出 chunk；可被 cancel 中止（使用者取消或斷線）。"""
+        username = getattr(self.user, 'username', 'Unknown')
+        try:
+            await self.send(text_data=json.dumps({
+                'type': 'ai_stream_start',
+                'action': action
+            }))
+            async for chunk in ai_service.process_stream(action, text):
+                await self.send(text_data=json.dumps({
+                    'type': 'ai_stream_chunk',
+                    'chunk': chunk
+                }))
+            await self.send(text_data=json.dumps({
+                'type': 'ai_stream_end',
+                'action': action
+            }))
+            logger.info(f"AI 串流完成: user={self.user.id}, action={action}")
+        except asyncio.CancelledError:
+            # 使用者取消或連線中斷：停止生成、不再送資料
+            logger.info(f"AI 串流被取消: user={username}, action={action}")
+            raise
+        except (ValueError, RuntimeError) as e:
+            await self._send_ai_stream_error(str(e))
+        except Exception as e:
+            logger.error(f"AI 串流未預期錯誤: user={username}, error={e}")
+            await self._send_ai_stream_error('AI 串流失敗')
+
+    async def handle_ai_stream_cancel(self):
+        """取消進行中的 AI 串流任務（前端按下停止）。"""
+        task = getattr(self, '_ai_stream_task', None)
+        if task is not None and not task.done():
+            task.cancel()
+            logger.debug(f"收到取消請求，已取消用戶 {self.user.id} 的 AI 串流")
 
     async def doc_update(self, event):
         """

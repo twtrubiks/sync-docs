@@ -293,6 +293,13 @@ class AskResponse(Schema):
     error: Optional[str] = None
 
 
+class AIStreamMessage(Schema):
+    """WebSocket AI 串流請求驗證（摘要/潤稿，逐字回傳給發送者本人）"""
+    type: str = "ai_stream"
+    action: Literal["summarize", "polish"]
+    text: str  # 最大長度在 ai_service.py 處理（5000 字元）
+
+
 # ============ 評論相關 Schema ============
 
 class CommentCreateSchema(Schema):

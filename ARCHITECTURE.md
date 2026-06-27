@@ -365,6 +365,28 @@ SyncDocs 是一個**教學型**的即時協作文件編輯器，展示了現代�
 
 **Gemini Client：** 延遲初始化（lazy init），避免模組載入時 Django settings 未就緒。全域單例，不重複建立連線。
 
+#### AI 串流（摘要 / 潤稿，走既有 WebSocket）
+
+摘要與潤稿改以串流逐字回傳，提升等待體感（time to first token）。為複用既有連線的 JWT 認證與限流，串流走 `DocConsumer`（而非 HTTP），新增 `ai_stream` 訊息類型，chunk **只回傳給發送者本人**（`self.send`，不經 `group_send`），不影響其他協作者。
+
+```
+前端送出： {type: "ai_stream", action: "summarize"|"polish", text: "選取的文字"}
+前端取消： {type: "ai_stream_cancel"}
+
+後端回傳（僅發送者）：
+  {type: "ai_stream_start", action}          # 開始
+  {type: "ai_stream_chunk", chunk}           # 逐塊文字 delta（多次）
+  {type: "ai_stream_end", action}            # 完成
+  {type: "ai_stream_error", message}         # 失敗 / 速率限制 / 格式錯誤
+```
+
+**要點：**
+
+- **服務層**：`ai_service.process_stream()` 以 `agent.run_stream()` + `result.stream_text(delta=True)` 逐塊 yield，與非串流 `process()` 共用 PROMPTS 與 agent。
+- **速率限制**：與 HTTP `/ai/process` 共用同一 Redis 額度鍵 `ai:{user_id}`（每次串流算一次），同步限流器以 `sync_to_async` 包裝避免阻塞事件迴圈。
+- **取消與資源**：串流為可取消的背景 `asyncio` 任務；使用者按「停止生成」或連線中斷（`disconnect`）時取消，停止生成後續 token。同一連線同時間僅允許一個串流。
+- **權限**：與 HTTP 一致，僅需認證、不要求文件寫入權限（套用結果才走一般 delta 寫入路徑）。
+
 ---
 
 ## 核心模組設計

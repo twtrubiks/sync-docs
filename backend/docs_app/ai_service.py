@@ -7,6 +7,7 @@ process(action, text) 介面與回傳純文字維持不變，向下相容既有 
 """
 
 import logging
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from django.conf import settings
@@ -219,6 +220,44 @@ class AIService:
             raise RuntimeError("AI 服務暫時無法使用")
         except Exception as e:
             logger.error(f"AI unexpected error: {e}")
+            raise RuntimeError(f"AI 處理失敗：{str(e)}")
+
+    async def process_stream(self, action: str, text: str) -> AsyncIterator[str]:
+        """串流處理 AI 請求（摘要/潤稿），逐塊 yield 文字 delta。
+
+        與 process() 共用 PROMPTS 與 agent，差別在以 run_stream 逐塊回傳，
+        供 WebSocket 即時送到前端（打字機效果）。呼叫端取消迭代即停止生成。
+        """
+        if action not in PROMPTS:
+            raise ValueError(f"Unknown action: {action}")
+
+        if not text.strip():
+            raise ValueError("Text cannot be empty")
+
+        if not _get_api_key():
+            raise RuntimeError("AI 服務未配置")
+
+        # 限制輸入長度（避免 token 過多）
+        max_chars = 5000
+        if len(text) > max_chars:
+            text = text[:max_chars] + "..."
+
+        prompt = PROMPTS[action].format(text=text)
+
+        try:
+            async with _get_agent().run_stream(prompt) as result:
+                async for chunk in result.stream_text(delta=True):
+                    yield chunk
+        except ModelHTTPError as e:
+            if getattr(e, "status_code", None) == 429:
+                logger.warning("AI API quota exhausted")
+                raise RuntimeError("API 配額已用盡，請稍後再試")
+            logger.error(f"AI API error: {e}")
+            raise RuntimeError("AI 服務暫時無法使用")
+        except (ValueError, RuntimeError):
+            raise
+        except Exception as e:
+            logger.error(f"AI stream unexpected error: {e}")
             raise RuntimeError(f"AI 處理失敗：{str(e)}")
 
     async def proofread(self, text: str) -> ProofreadResult:

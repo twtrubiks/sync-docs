@@ -108,6 +108,10 @@
 	let savedSelection = $state<{ index: number; length: number } | null>(null);
 	let savedOriginalText = $state(''); // For conflict detection
 
+	// AI 串流狀態（摘要/潤稿走既有 WebSocket 逐字回傳）
+	let aiStreaming = $state(false);
+	let aiStreamText = $state('');
+
 	// AI 文件分析（metadata）對話框：作用於整份文件
 	let showMetadataDialog = $state(false);
 	let metadataDocText = $state('');
@@ -352,6 +356,20 @@
 						toastError(data.message || 'An error occurred.');
 					}
 					break;
+				// AI 串流事件（摘要/潤稿，只回傳給發送者本人）
+				case 'ai_stream_start':
+					// 串流開始（前端送出時已顯示載入狀態，此處僅作確認）
+					break;
+				case 'ai_stream_chunk':
+					aiStreamText += data.chunk ?? '';
+					break;
+				case 'ai_stream_end':
+					aiStreaming = false;
+					break;
+				case 'ai_stream_error':
+					aiStreaming = false;
+					toastError(data.message || 'AI 串流失敗');
+					break;
 				// Comment events
 				case 'comment_add':
 					commentPanel?.addCommentFromWS(data.comment);
@@ -585,6 +603,27 @@
 
 		// Note: Using 'user' as source will trigger text-change event
 		// Changes will be synced to other collaborators via existing WebSocket mechanism
+	}
+
+	// 啟動 AI 串流（摘要/潤稿）：透過既有 WebSocket 送出請求，逐字回傳給自己
+	// 回傳是否成功啟動（連線中斷時為 false，供對話框還原狀態）
+	function startAIStream(action: 'summarize' | 'polish', text: string): boolean {
+		if (!socket || socket.readyState !== WebSocket.OPEN) {
+			toastError('連線中斷，無法使用 AI 串流');
+			return false;
+		}
+		aiStreamText = '';
+		aiStreaming = true;
+		socket.send(JSON.stringify({ type: 'ai_stream', action, text }));
+		return true;
+	}
+
+	// 取消進行中的 AI 串流（使用者按下停止或關閉對話框）
+	function cancelAIStream() {
+		if (socket && socket.readyState === WebSocket.OPEN) {
+			socket.send(JSON.stringify({ type: 'ai_stream_cancel' }));
+		}
+		aiStreaming = false;
 	}
 
 	// 開啟文件分析（metadata）對話框：以整份文件純文字為輸入
@@ -917,7 +956,15 @@
 />
 
 <!-- AI 對話框 -->
-<AIDialog bind:isOpen={showAIDialog} selectedText={selectedTextForAI} onApply={applyAIResult} />
+<AIDialog
+	bind:isOpen={showAIDialog}
+	selectedText={selectedTextForAI}
+	onApply={applyAIResult}
+	onStream={startAIStream}
+	onCancelStream={cancelAIStream}
+	streaming={aiStreaming}
+	streamText={aiStreamText}
+/>
 
 <!-- AI 文件分析對話框 -->
 <AIMetadataDialog bind:isOpen={showMetadataDialog} documentText={metadataDocText} />

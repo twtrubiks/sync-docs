@@ -3,11 +3,14 @@ WebSocket消費者測試模組
 測試文檔協作的WebSocket功能
 """
 
+import asyncio
 import json
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from django.contrib.auth.models import AnonymousUser
 from docs_app.consumers import DocConsumer, MAX_MESSAGE_SIZE, MAX_OPS_COUNT
+from docs_app.ai_service import ai_service
+from docs_app.ai_rate_limiter import ai_rate_limiter
 
 pytestmark = pytest.mark.django_db
 
@@ -250,5 +253,146 @@ class TestDocConsumerValidation:
 
         # 應該廣播到群組
         mock_consumer.channel_layer.group_send.assert_called_once()
+
+
+class TestDocConsumerAIStream:
+    """測試 WebSocket AI 串流（摘要/潤稿，逐字回傳給發送者本人）"""
+
+    @pytest.fixture
+    def mock_consumer(self, test_user, test_document):
+        """創建模擬的 consumer 實例（AI 串流不要求寫入權限，與 HTTP /ai/process 一致）"""
+        consumer = DocConsumer()
+        consumer.user = test_user
+        consumer.document_id = str(test_document.id)
+        consumer.room_group_name = f'doc_{test_document.id}'
+        consumer.channel_name = 'test_channel'
+        consumer.channel_layer = MagicMock()
+        consumer.channel_layer.group_send = AsyncMock()
+        consumer.send = AsyncMock()
+        consumer.can_write = True
+        return consumer
+
+    @staticmethod
+    def _sent_messages(mock_consumer):
+        """擷取所有經由 self.send 送出的訊息（已解析 JSON）"""
+        return [
+            json.loads(call.kwargs['text_data'])
+            for call in mock_consumer.send.call_args_list
+        ]
+
+    async def test_ai_stream_sends_start_chunks_end(self, mock_consumer):
+        """正常串流：依序送出 start → chunk(s) → end，且 chunk 內容正確"""
+        async def fake_stream(action, text):
+            for c in ['你好', '世界']:
+                yield c
+
+        with patch.object(ai_service, 'process_stream', fake_stream), \
+                patch.object(ai_rate_limiter, 'is_allowed', return_value=True):
+            await mock_consumer.receive(text_data=json.dumps({
+                'type': 'ai_stream', 'action': 'summarize', 'text': '測試'
+            }))
+            # 等背景串流任務完成
+            await mock_consumer._ai_stream_task
+
+        messages = self._sent_messages(mock_consumer)
+        assert [m['type'] for m in messages] == [
+            'ai_stream_start', 'ai_stream_chunk', 'ai_stream_chunk', 'ai_stream_end'
+        ]
+        chunks = [m['chunk'] for m in messages if m['type'] == 'ai_stream_chunk']
+        assert chunks == ['你好', '世界']
+        assert messages[0]['action'] == 'summarize'
+
+    async def test_ai_stream_rate_limited(self, mock_consumer):
+        """超過速率限制：回傳 ai_stream_error，且不啟動串流任務"""
+        with patch.object(ai_rate_limiter, 'is_allowed', return_value=False):
+            await mock_consumer.receive(text_data=json.dumps({
+                'type': 'ai_stream', 'action': 'summarize', 'text': '測試'
+            }))
+
+        messages = self._sent_messages(mock_consumer)
+        assert len(messages) == 1
+        assert messages[0]['type'] == 'ai_stream_error'
+        assert '頻繁' in messages[0]['message']
+        assert getattr(mock_consumer, '_ai_stream_task', None) is None
+
+    async def test_ai_stream_invalid_action(self, mock_consumer):
+        """無效 action：回傳 ai_stream_error（驗證在速率限制之前）"""
+        await mock_consumer.receive(text_data=json.dumps({
+            'type': 'ai_stream', 'action': 'translate', 'text': '測試'
+        }))
+
+        messages = self._sent_messages(mock_consumer)
+        assert len(messages) == 1
+        assert messages[0]['type'] == 'ai_stream_error'
+
+    async def test_ai_stream_service_error_sends_stream_error(self, mock_consumer):
+        """串流期間服務拋錯：start 之後回傳 ai_stream_error"""
+        async def failing_stream(action, text):
+            raise RuntimeError('AI 服務暫時無法使用')
+            yield  # pragma: no cover - 使函式成為 async generator
+
+        with patch.object(ai_service, 'process_stream', failing_stream), \
+                patch.object(ai_rate_limiter, 'is_allowed', return_value=True):
+            await mock_consumer.receive(text_data=json.dumps({
+                'type': 'ai_stream', 'action': 'polish', 'text': '測試'
+            }))
+            await mock_consumer._ai_stream_task
+
+        messages = self._sent_messages(mock_consumer)
+        assert messages[0]['type'] == 'ai_stream_start'
+        assert messages[-1]['type'] == 'ai_stream_error'
+        assert messages[-1]['message'] == 'AI 服務暫時無法使用'
+
+    async def test_ai_stream_cancel_stops_task(self, mock_consumer):
+        """收到 ai_stream_cancel：取消進行中的串流任務"""
+        started = asyncio.Event()
+
+        async def slow_stream(action, text):
+            started.set()
+            for i in range(1000):
+                yield f'chunk{i}'
+                await asyncio.sleep(0.01)
+
+        with patch.object(ai_service, 'process_stream', slow_stream), \
+                patch.object(ai_rate_limiter, 'is_allowed', return_value=True):
+            await mock_consumer.receive(text_data=json.dumps({
+                'type': 'ai_stream', 'action': 'summarize', 'text': '測試'
+            }))
+            await started.wait()
+            await mock_consumer.handle_ai_stream_cancel()
+
+            with pytest.raises(asyncio.CancelledError):
+                await mock_consumer._ai_stream_task
+
+    async def test_ai_stream_busy_rejects_second_request(self, mock_consumer):
+        """已有串流進行中時，第二個請求被拒（ai_stream_error）"""
+        release = asyncio.Event()
+
+        async def blocking_stream(action, text):
+            await release.wait()
+            yield '完成'
+
+        with patch.object(ai_service, 'process_stream', blocking_stream), \
+                patch.object(ai_rate_limiter, 'is_allowed', return_value=True):
+            # 第一個請求：啟動後卡在 release.wait()
+            await mock_consumer.receive(text_data=json.dumps({
+                'type': 'ai_stream', 'action': 'summarize', 'text': '第一個'
+            }))
+            await asyncio.sleep(0)  # 讓背景任務開始執行
+            # 第二個請求：應被拒
+            await mock_consumer.receive(text_data=json.dumps({
+                'type': 'ai_stream', 'action': 'summarize', 'text': '第二個'
+            }))
+
+            busy_messages = [
+                m for m in self._sent_messages(mock_consumer)
+                if m['type'] == 'ai_stream_error'
+            ]
+            assert len(busy_messages) == 1
+            assert '進行中' in busy_messages[0]['message']
+
+            # 收尾：放行第一個任務並等待完成
+            release.set()
+            await mock_consumer._ai_stream_task
 
 
