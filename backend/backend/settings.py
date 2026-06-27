@@ -297,6 +297,12 @@ if not os.path.exists(log_dir):
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
 
-# AI 設定
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
+# AI 設定 — 供應商切換：nvidia（NIM，OpenAI 相容端點）| gemini（Google 原生 SDK）
+AI_PROVIDER = os.environ.get('AI_PROVIDER', 'nvidia')
+# NVIDIA NIM（OpenAI 相容端點）；取得 key：https://build.nvidia.com/
+NVIDIA_API_KEY = os.environ.get('NVIDIA_API_KEY', '')
+NVIDIA_BASE_URL = os.environ.get('NVIDIA_BASE_URL', 'https://integrate.api.nvidia.com/v1')
+NVIDIA_MODEL = os.environ.get('NVIDIA_MODEL', 'nvidia/nemotron-3-super-120b-a12b')
+# Gemini（Google AI Studio）；AI_PROVIDER=gemini 時生效，取得 key：https://aistudio.google.com/
+GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY', '')
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3-flash-preview')

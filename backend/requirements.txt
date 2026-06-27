@@ -22,5 +22,5 @@ channels-redis==4.3.0
 # 數據庫適配器
 psycopg[binary]==3.3.4
 
-# AI 整合
-google-genai==1.69.0
+# AI 整合 — Pydantic AI 接 NVIDIA NIM（OpenAI 相容端點）或 Gemini（Google 原生 SDK）
+pydantic-ai-slim[openai,google]==2.0.0

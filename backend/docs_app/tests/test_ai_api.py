@@ -1,13 +1,20 @@
 """
 AI API 測試
 使用單元測試方式測試 AIService 和 AIRateLimiter
+
+AIService 行為測試以 TestModel / FunctionModel override agent，全程不打外部 API。
 """
 
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock
+from django.test import override_settings
 from pydantic import ValidationError
+from pydantic_ai.messages import ModelResponse, TextPart, UserPromptPart
+from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.test import TestModel
 
-from docs_app.ai_service import AIService
+from docs_app import ai_service as ai_service_module
+from docs_app.ai_service import AIService, _get_agent, _get_model
 from docs_app.ai_rate_limiter import AIRateLimiter
 from docs_app.schemas import AIProcessRequest, AIProcessResponse
 
@@ -15,109 +22,86 @@ from docs_app.schemas import AIProcessRequest, AIProcessResponse
 pytestmark = pytest.mark.django_db
 
 
-class TestAIService:
-    """AI Service 單元測試"""
+@pytest.fixture(autouse=True)
+def _reset_ai_globals():
+    """每個測試前後重置模組級單例，避免供應商切換互相污染。"""
+    ai_service_module._model = None
+    ai_service_module._agent = None
+    yield
+    ai_service_module._model = None
+    ai_service_module._agent = None
 
+
+class TestAIService:
+    """AI Service 單元測試（以 TestModel / FunctionModel override agent，全程不打 API）"""
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
     async def test_process_summarize(self):
         """測試摘要功能"""
-        with patch('docs_app.ai_service.genai') as mock_genai:
-            # 設定 mock - 新 SDK 使用 Client().aio.models.generate_content
-            mock_client = MagicMock()
-            mock_response = MagicMock()
-            mock_response.text = "這是摘要結果"
-            mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
-            mock_genai.Client.return_value = mock_client
+        with _get_agent().override(model=TestModel(custom_output_text="這是摘要結果")):
+            result = await AIService().process('summarize', '測試文字')
+            assert result == "這是摘要結果"
 
-            # 創建新的 AIService 實例以使用 mock
-            with patch('docs_app.ai_service.settings') as mock_settings:
-                mock_settings.GEMINI_API_KEY = 'test_key'
-                mock_settings.GEMINI_MODEL = 'test_model'
-
-                service = AIService()
-                service._initialized = False  # 強制重新初始化
-
-                result = await service.process('summarize', '測試文字')
-
-                assert result == "這是摘要結果"
-
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
     async def test_process_polish(self):
         """測試潤稿功能"""
-        with patch('docs_app.ai_service.genai') as mock_genai:
-            mock_client = MagicMock()
-            mock_response = MagicMock()
-            mock_response.text = "潤飾後的文字"
-            mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
-            mock_genai.Client.return_value = mock_client
+        with _get_agent().override(model=TestModel(custom_output_text="潤飾後的文字")):
+            result = await AIService().process('polish', '原始文字')
+            assert result == "潤飾後的文字"
 
-            with patch('docs_app.ai_service.settings') as mock_settings:
-                mock_settings.GEMINI_API_KEY = 'test_key'
-                mock_settings.GEMINI_MODEL = 'test_model'
-
-                service = AIService()
-                service._initialized = False
-
-                result = await service.process('polish', '原始文字')
-
-                assert result == "潤飾後的文字"
-
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
     async def test_empty_text_error(self):
         """測試空文字錯誤"""
-        with patch('docs_app.ai_service.settings') as mock_settings:
-            mock_settings.GEMINI_API_KEY = 'test_key'
-            mock_settings.GEMINI_MODEL = 'test_model'
+        with pytest.raises(ValueError, match="Text cannot be empty"):
+            await AIService().process('summarize', '')
 
-            service = AIService()
-
-            with pytest.raises(ValueError, match="Text cannot be empty"):
-                await service.process('summarize', '')
-
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
     async def test_invalid_action_error(self):
         """測試無效操作錯誤"""
-        with patch('docs_app.ai_service.settings') as mock_settings:
-            mock_settings.GEMINI_API_KEY = 'test_key'
-            mock_settings.GEMINI_MODEL = 'test_model'
+        with pytest.raises(ValueError, match="Unknown action"):
+            await AIService().process('invalid', '文字')
 
-            service = AIService()
-
-            with pytest.raises(ValueError, match="Unknown action"):
-                await service.process('invalid', '文字')
-
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='')
     async def test_api_not_configured_error(self):
         """測試 API Key 未配置錯誤"""
-        with patch('docs_app.ai_service.settings') as mock_settings:
-            mock_settings.GEMINI_API_KEY = ''  # 空的 API key
-            mock_settings.GEMINI_MODEL = 'test_model'
+        with pytest.raises(RuntimeError, match="AI 服務未配置"):
+            await AIService().process('summarize', '文字')
 
-            service = AIService()
-            service._initialized = False
-
-            with pytest.raises(RuntimeError, match="AI 服務未配置"):
-                await service.process('summarize', '文字')
-
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
     async def test_text_truncation(self):
-        """測試文字長度限制（超過 5000 字元會被截斷）"""
-        with patch('docs_app.ai_service.genai') as mock_genai:
-            mock_client = MagicMock()
-            mock_response = MagicMock()
-            mock_response.text = "結果"
-            mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
-            mock_genai.Client.return_value = mock_client
+        """測試文字長度限制（超過 5000 字元會被截斷後才送進 agent）"""
+        captured = {}
 
-            with patch('docs_app.ai_service.settings') as mock_settings:
-                mock_settings.GEMINI_API_KEY = 'test_key'
-                mock_settings.GEMINI_MODEL = 'test_model'
+        async def capture_fn(messages, info):
+            for message in messages:
+                for part in message.parts:
+                    if isinstance(part, UserPromptPart):
+                        captured['prompt'] = str(part.content)
+            return ModelResponse(parts=[TextPart('結果')])
 
-                service = AIService()
-                service._initialized = False
+        long_text = 'A' * 6000
+        with _get_agent().override(model=FunctionModel(capture_fn)):
+            await AIService().process('summarize', long_text)
 
-                # 創建超過 5000 字元的文字
-                long_text = 'A' * 6000
+        # 送進 agent 的 prompt 應含截斷省略號
+        assert '...' in captured['prompt']
 
-                await service.process('summarize', long_text)
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='nv-key')
+    def test_nvidia_builds_openai_model(self):
+        """nvidia 供應商建立 OpenAIChatModel（不打 API）"""
+        from pydantic_ai.models.openai import OpenAIChatModel
+        assert isinstance(_get_model(), OpenAIChatModel)
 
-                # 檢查傳遞給 API 的 contents 是否被截斷
-                call_kwargs = mock_client.aio.models.generate_content.call_args[1]
-                assert '...' in call_kwargs['contents']  # 應該有省略號
+    @override_settings(AI_PROVIDER='gemini', GOOGLE_API_KEY='g-key')
+    def test_gemini_builds_google_model(self):
+        """gemini 供應商建立 GoogleModel（不打 API）"""
+        from pydantic_ai.models.google import GoogleModel
+        assert isinstance(_get_model(), GoogleModel)
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='nv-key')
+    def test_model_is_cached(self):
+        """惰性單例：重複呼叫回傳同一實例"""
+        assert _get_model() is _get_model()
 
 
 class TestAIRateLimiter:

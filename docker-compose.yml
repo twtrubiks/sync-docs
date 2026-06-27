@@ -35,7 +35,11 @@ services:
         - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
         - REDIS_HOST=django-redis
         - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
-        - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+        - AI_PROVIDER=${AI_PROVIDER:-nvidia}
+        - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+        - NVIDIA_BASE_URL=${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}
+        - NVIDIA_MODEL=${NVIDIA_MODEL:-nvidia/nemotron-3-super-120b-a12b}
+        - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
         - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3-flash-preview}
       depends_on:
         - django-postgres
