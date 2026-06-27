@@ -20,7 +20,7 @@ channels[daphne]==4.3.2
 channels-redis==4.3.0
 
 # 數據庫適配器
-psycopg2-binary==2.9.11
+psycopg[binary]==3.3.4
 
 # AI 整合
 google-genai==1.69.0
