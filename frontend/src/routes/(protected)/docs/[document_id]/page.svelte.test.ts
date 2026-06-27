@@ -104,15 +104,19 @@ describe('Document Page - Load States', () => {
 		vi.clearAllMocks();
 
 		// Mock WebSocket
-		globalThis.WebSocket = vi.fn().mockImplementation(() => ({
-			close: vi.fn(),
-			send: vi.fn(),
-			readyState: 1,
-			onopen: null,
-			onclose: null,
-			onmessage: null,
-			onerror: null
-		})) as unknown as typeof WebSocket;
+		// 注意：Vitest 4 起，被 `new` 呼叫的 mock 必須使用 function/class 實作，
+		// 箭頭函式會拋出 "is not a constructor"。
+		globalThis.WebSocket = vi.fn().mockImplementation(function () {
+			return {
+				close: vi.fn(),
+				send: vi.fn(),
+				readyState: 1,
+				onopen: null,
+				onclose: null,
+				onmessage: null,
+				onerror: null
+			};
+		}) as unknown as typeof WebSocket;
 
 		// Mock localStorage
 		const store: Record<string, string> = { access_token: 'mock-token' };
