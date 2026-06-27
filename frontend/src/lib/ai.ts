@@ -13,6 +13,25 @@ export interface AIProcessResponse {
 	error?: string;
 }
 
+// 結構化校對（proofread）
+export interface WritingIssue {
+	original: string;
+	suggestion: string;
+	reason: string;
+	severity: 'info' | 'warning' | 'error';
+}
+
+export interface ProofreadResult {
+	issues: WritingIssue[];
+	overall_score: number;
+}
+
+export interface ProofreadResponse {
+	success: boolean;
+	result?: ProofreadResult;
+	error?: string;
+}
+
 // AI 請求超時時間（毫秒）
 const AI_REQUEST_TIMEOUT = 30000;
 
@@ -30,6 +49,21 @@ export async function processWithAI(
 			request as unknown as Record<string, unknown>,
 			controller?.signal || signal
 		);
+	} finally {
+		if (timeoutId) clearTimeout(timeoutId);
+	}
+}
+
+export async function proofreadWithAI(
+	text: string,
+	signal?: AbortSignal
+): Promise<ProofreadResponse> {
+	// 若未提供 signal，自動建立超時控制
+	const controller = signal ? null : new AbortController();
+	const timeoutId = controller ? setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT) : null;
+
+	try {
+		return await post('/ai/proofread', { text }, controller?.signal || signal);
 	} finally {
 		if (timeoutId) clearTimeout(timeoutId);
 	}

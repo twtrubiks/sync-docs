@@ -5,7 +5,8 @@ import AIDialog from './AIDialog.svelte';
 
 // Mock AI API
 vi.mock('$lib/ai', () => ({
-	processWithAI: vi.fn()
+	processWithAI: vi.fn(),
+	proofreadWithAI: vi.fn()
 }));
 
 // Mock toast
@@ -20,7 +21,7 @@ vi.mock('$app/environment', () => ({
 	browser: true
 }));
 
-import { processWithAI } from '$lib/ai';
+import { processWithAI, proofreadWithAI } from '$lib/ai';
 import { toastError } from '$lib/toast';
 
 describe('AIDialog', () => {
@@ -237,6 +238,129 @@ describe('AIDialog', () => {
 		expect(processWithAI).toHaveBeenCalledWith({
 			action: 'polish',
 			text: 'Test text to polish'
+		});
+	});
+
+	it('should call proofreadWithAI with selected text', async () => {
+		vi.mocked(proofreadWithAI).mockResolvedValue({
+			success: true,
+			result: { issues: [], overall_score: 90 }
+		});
+
+		render(AIDialog, {
+			props: {
+				isOpen: true,
+				selectedText: 'Text to proofread',
+				onApply: vi.fn()
+			}
+		});
+
+		await fireEvent.click(screen.getByText('校對'));
+
+		expect(proofreadWithAI).toHaveBeenCalledWith('Text to proofread');
+	});
+
+	it('should render proofread issues with score', async () => {
+		vi.mocked(proofreadWithAI).mockResolvedValue({
+			success: true,
+			result: {
+				issues: [{ original: '錯字', suggestion: '正字', reason: '用字錯誤', severity: 'warning' }],
+				overall_score: 75
+			}
+		});
+
+		render(AIDialog, {
+			props: {
+				isOpen: true,
+				selectedText: '這是錯字範例',
+				onApply: vi.fn()
+			}
+		});
+
+		await fireEvent.click(screen.getByText('校對'));
+
+		await waitFor(() => {
+			expect(screen.getByText('校對結果')).toBeInTheDocument();
+			expect(screen.getByText('75')).toBeInTheDocument();
+			expect(screen.getByText('正字')).toBeInTheDocument();
+			expect(screen.getByText('用字錯誤')).toBeInTheDocument();
+		});
+	});
+
+	it('should apply an issue via string match and call onApply with corrected text', async () => {
+		const onApply = vi.fn();
+		vi.mocked(proofreadWithAI).mockResolvedValue({
+			success: true,
+			result: {
+				issues: [{ original: '錯字', suggestion: '正字', reason: '用字錯誤', severity: 'warning' }],
+				overall_score: 75
+			}
+		});
+
+		render(AIDialog, {
+			props: {
+				isOpen: true,
+				selectedText: '這是錯字範例',
+				onApply
+			}
+		});
+
+		await fireEvent.click(screen.getByText('校對'));
+
+		await waitFor(() => {
+			expect(screen.getByText('套用')).toBeInTheDocument();
+		});
+
+		// 逐項套用：工作文字中以字串比對取代
+		await fireEvent.click(screen.getByText('套用'));
+		await waitFor(() => {
+			expect(screen.getByText('已套用')).toBeInTheDocument();
+		});
+
+		// 套用變更到文件
+		await fireEvent.click(screen.getByText('套用變更到文件'));
+		expect(onApply).toHaveBeenCalledWith('這是正字範例');
+	});
+
+	it('should show no-issues message when proofread finds nothing', async () => {
+		vi.mocked(proofreadWithAI).mockResolvedValue({
+			success: true,
+			result: { issues: [], overall_score: 100 }
+		});
+
+		render(AIDialog, {
+			props: {
+				isOpen: true,
+				selectedText: '完美的文字',
+				onApply: vi.fn()
+			}
+		});
+
+		await fireEvent.click(screen.getByText('校對'));
+
+		await waitFor(() => {
+			expect(screen.getByText('沒有發現明顯問題 🎉')).toBeInTheDocument();
+		});
+	});
+
+	it('should show error toast when proofread fails', async () => {
+		vi.mocked(proofreadWithAI).mockResolvedValue({
+			success: false,
+			error: 'Proofread error'
+		});
+
+		render(AIDialog, {
+			props: {
+				isOpen: true,
+				selectedText: 'Test text',
+				onApply: vi.fn()
+			}
+		});
+
+		await fireEvent.click(screen.getByText('校對'));
+
+		await waitFor(() => {
+			expect(toastError).toHaveBeenCalledWith('Proofread error');
 		});
 	});
 });
