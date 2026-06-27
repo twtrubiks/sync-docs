@@ -46,6 +46,13 @@ export interface MetadataResponse {
 	error?: string;
 }
 
+// 文件問答
+export interface AskResponse {
+	success: boolean;
+	answer?: string;
+	error?: string;
+}
+
 // AI 請求超時時間（毫秒）
 const AI_REQUEST_TIMEOUT = 30000;
 
@@ -93,6 +100,26 @@ export async function metadataWithAI(
 
 	try {
 		return await post('/ai/metadata', { text }, controller?.signal || signal);
+	} finally {
+		if (timeoutId) clearTimeout(timeoutId);
+	}
+}
+
+export async function askWithAI(
+	question: string,
+	documentText: string,
+	signal?: AbortSignal
+): Promise<AskResponse> {
+	// 若未提供 signal，自動建立超時控制
+	const controller = signal ? null : new AbortController();
+	const timeoutId = controller ? setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT) : null;
+
+	try {
+		return await post(
+			'/ai/ask',
+			{ question, document_text: documentText },
+			controller?.signal || signal
+		);
 	} finally {
 		if (timeoutId) clearTimeout(timeoutId);
 	}

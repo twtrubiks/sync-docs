@@ -6,6 +6,7 @@
 	import VersionHistoryPanel from '$lib/components/VersionHistoryPanel.svelte';
 	import AIDialog from '$lib/components/AIDialog.svelte';
 	import AIMetadataDialog from '$lib/components/AIMetadataDialog.svelte';
+	import AIAskDialog from '$lib/components/AIAskDialog.svelte';
 	import CommentPanel from '$lib/components/CommentPanel.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { get, put, del, post, logout, refreshAccessToken, type Collaborator } from '$lib/auth';
@@ -25,7 +26,8 @@
 		UserMinus,
 		TriangleAlert,
 		RefreshCw,
-		ScanText
+		ScanText,
+		MessageCircleQuestion
 	} from '@lucide/svelte';
 
 	// WebSocket Close Codes（與後端對應）
@@ -109,6 +111,10 @@
 	// AI 文件分析（metadata）對話框：作用於整份文件
 	let showMetadataDialog = $state(false);
 	let metadataDocText = $state('');
+
+	// AI 文件問答（ask）對話框：作用於整份文件
+	let showAskDialog = $state(false);
+	let askDocText = $state('');
 
 	async function getCollaborators() {
 		try {
@@ -595,6 +601,20 @@
 		showMetadataDialog = true;
 	}
 
+	// 開啟文件問答（ask）對話框：以整份文件純文字為問答依據
+	function openAskDialog() {
+		if (!editor) return;
+
+		const text = editor.getText();
+		if (!text.trim()) {
+			toastWarning('文件目前是空的');
+			return;
+		}
+
+		askDocText = text;
+		showAskDialog = true;
+	}
+
 	// 還原版本後重新載入文件
 	async function handleVersionRestore() {
 		try {
@@ -707,6 +727,16 @@
 					aria-label="文件分析"
 				>
 					<ScanText size={20} />
+				</button>
+				<!-- AI 文件問答按鈕 -->
+				<button
+					type="button"
+					class="toolbar-button"
+					onclick={openAskDialog}
+					title="文件問答"
+					aria-label="文件問答"
+				>
+					<MessageCircleQuestion size={20} />
 				</button>
 				<!-- 版本歷史按鈕 -->
 				<button
@@ -891,6 +921,9 @@
 
 <!-- AI 文件分析對話框 -->
 <AIMetadataDialog bind:isOpen={showMetadataDialog} documentText={metadataDocText} />
+
+<!-- AI 文件問答對話框 -->
+<AIAskDialog bind:isOpen={showAskDialog} documentText={askDocText} />
 
 <ConfirmDialog
 	bind:isOpen={showDeleteConfirm}

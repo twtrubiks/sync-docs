@@ -77,6 +77,10 @@ vi.mock('$lib/components/AIMetadataDialog.svelte', () => ({
 	default: createMockComponent()
 }));
 
+vi.mock('$lib/components/AIAskDialog.svelte', () => ({
+	default: createMockComponent()
+}));
+
 vi.mock('$lib/components/CommentPanel.svelte', () => ({
 	default: createMockComponent()
 }));
