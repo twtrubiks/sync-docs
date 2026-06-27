@@ -9,6 +9,7 @@
 	import { toastSuccess, toastError } from '$lib/toast';
 	import { X, RotateCcw, Clock, User } from '@lucide/svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
+	import type { DeltaOperation } from '$lib/types/quill';
 
 	interface Props {
 		documentId: string;
@@ -79,7 +80,7 @@
 				modules: { toolbar: false }
 			});
 		}
-		const ops = (content as { ops?: unknown[] }).ops;
+		const ops = (content as { ops?: DeltaOperation[] }).ops;
 		if (Array.isArray(ops)) {
 			previewQuill.setContents(ops, 'silent');
 		}
