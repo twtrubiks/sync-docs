@@ -19,7 +19,7 @@ from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
 
-from .schemas import ProofreadResult
+from .schemas import DocumentMetadata, ProofreadResult
 
 logger = logging.getLogger('docs_app')
 
@@ -32,6 +32,11 @@ PROOFREAD_SYSTEM_PROMPT = (
     "你是專業的繁體中文寫作校對助手。請仔細檢查使用者提供的文字，找出用詞、語法、"
     "流暢度、標點等問題，逐項給出原文片段、建議改寫與原因，並評估整體寫作品質分數（0-100）。"
     "original 必須與原文完全一致以利前端定位；若文字沒有明顯問題，issues 回傳空陣列並給高分。"
+)
+METADATA_SYSTEM_PROMPT = (
+    "你是文件分析助手。請閱讀使用者提供的文件內容，產生結構化 metadata："
+    "一句話摘要（summary，繁體中文）、3-5 個主題標籤（tags）、"
+    "主要語言代碼（language，如 zh-Hant / en）、預估閱讀時間分鐘數（reading_time）。"
 )
 
 # Prompt 模板
@@ -62,6 +67,7 @@ PROMPTS = {
 _model: Model | None = None
 _agent: Agent | None = None
 _proofread_agent: Agent | None = None
+_metadata_agent: Agent | None = None
 
 
 def _get_api_key() -> str:
@@ -138,6 +144,18 @@ def _get_proofread_agent() -> Agent:
     return _proofread_agent
 
 
+def _get_metadata_agent() -> Agent:
+    """惰性建立文件 metadata agent（output_type=DocumentMetadata，自動驗證 + 重試）。"""
+    global _metadata_agent
+    if _metadata_agent is None:
+        _metadata_agent = Agent(
+            _get_model(),
+            output_type=DocumentMetadata,
+            system_prompt=METADATA_SYSTEM_PROMPT,
+        )
+    return _metadata_agent
+
+
 class AIService:
     """AI 服務（摘要 / 潤稿），底層為 Pydantic AI agent。"""
 
@@ -200,6 +218,32 @@ class AIService:
             raise RuntimeError("AI 服務暫時無法使用")
         except Exception as e:
             logger.error(f"AI proofread unexpected error: {e}")
+            raise RuntimeError(f"AI 處理失敗：{str(e)}")
+
+    async def generate_metadata(self, text: str) -> DocumentMetadata:
+        """產生文件 metadata：回傳 DocumentMetadata（summary / tags / language / reading_time）。"""
+        if not text.strip():
+            raise ValueError("Text cannot be empty")
+
+        if not _get_api_key():
+            raise RuntimeError("AI 服務未配置")
+
+        # 限制輸入長度（避免 token 過多）
+        max_chars = 5000
+        if len(text) > max_chars:
+            text = text[:max_chars] + "..."
+
+        try:
+            result = await _get_metadata_agent().run(text)
+            return result.output
+        except ModelHTTPError as e:
+            if getattr(e, "status_code", None) == 429:
+                logger.warning("AI API quota exhausted")
+                raise RuntimeError("API 配額已用盡，請稍後再試")
+            logger.error(f"AI API error: {e}")
+            raise RuntimeError("AI 服務暫時無法使用")
+        except Exception as e:
+            logger.error(f"AI metadata unexpected error: {e}")
             raise RuntimeError(f"AI 處理失敗：{str(e)}")
 
 

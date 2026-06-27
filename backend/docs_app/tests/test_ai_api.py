@@ -14,11 +14,18 @@ from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from docs_app import ai_service as ai_service_module
-from docs_app.ai_service import AIService, _get_agent, _get_model, _get_proofread_agent
+from docs_app.ai_service import (
+    AIService,
+    _get_agent,
+    _get_metadata_agent,
+    _get_model,
+    _get_proofread_agent,
+)
 from docs_app.ai_rate_limiter import AIRateLimiter
 from docs_app.schemas import (
     AIProcessRequest,
     AIProcessResponse,
+    DocumentMetadata,
     ProofreadResult,
     WritingIssue,
 )
@@ -33,10 +40,12 @@ def _reset_ai_globals():
     ai_service_module._model = None
     ai_service_module._agent = None
     ai_service_module._proofread_agent = None
+    ai_service_module._metadata_agent = None
     yield
     ai_service_module._model = None
     ai_service_module._agent = None
     ai_service_module._proofread_agent = None
+    ai_service_module._metadata_agent = None
 
 
 class TestAIService:
@@ -160,6 +169,49 @@ class TestProofread:
         """測試 API Key 未配置錯誤"""
         with pytest.raises(RuntimeError, match="AI 服務未配置"):
             await AIService().proofread('文字')
+
+
+class TestMetadata:
+    """文件 metadata 測試（output_type=DocumentMetadata，以 TestModel override agent，不打 API）"""
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_returns_structured_result(self):
+        """回傳型別安全的 DocumentMetadata（TestModel 自動產生符合 schema 的輸出）"""
+        with _get_metadata_agent().override(model=TestModel()):
+            result = await AIService().generate_metadata('一段文件內容')
+
+        assert isinstance(result, DocumentMetadata)
+        assert isinstance(result.tags, list)
+        assert result.reading_time >= 0
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_custom_output_flows_through(self):
+        """指定結構化輸出時，欄位原樣回傳"""
+        custom = {
+            "summary": "這是一份關於 Docker 的教學文件",
+            "tags": ["Docker", "容器化", "教學"],
+            "language": "zh-Hant",
+            "reading_time": 5,
+        }
+        with _get_metadata_agent().override(model=TestModel(custom_output_args=custom)):
+            result = await AIService().generate_metadata('Docker 教學內容')
+
+        assert result.summary == "這是一份關於 Docker 的教學文件"
+        assert result.tags == ["Docker", "容器化", "教學"]
+        assert result.language == "zh-Hant"
+        assert result.reading_time == 5
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_empty_text_error(self):
+        """測試空文字錯誤"""
+        with pytest.raises(ValueError, match="Text cannot be empty"):
+            await AIService().generate_metadata('')
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='')
+    async def test_not_configured_error(self):
+        """測試 API Key 未配置錯誤"""
+        with pytest.raises(RuntimeError, match="AI 服務未配置"):
+            await AIService().generate_metadata('文字')
 
 
 class TestAIRateLimiter:

@@ -260,6 +260,26 @@ class ProofreadResponse(Schema):
     error: Optional[str] = None
 
 
+class DocumentMetadata(BaseModel):
+    """文件 metadata（metadata agent 的結構化輸出）"""
+    summary: str = Field(description="文件的一句話摘要（繁體中文）")
+    tags: List[str] = Field(description="3-5 個主題標籤")
+    language: str = Field(description="文件主要語言代碼，如 zh-Hant、en")
+    reading_time: int = Field(ge=0, description="預估閱讀時間（分鐘）")
+
+
+class MetadataRequest(Schema):
+    """AI metadata 產生請求"""
+    text: str  # 最大長度在 ai_service.py 中處理（5000 字元）
+
+
+class MetadataResponse(Schema):
+    """AI metadata 回應（成功時 result 為結構化的 DocumentMetadata）"""
+    success: bool
+    result: Optional[DocumentMetadata] = None
+    error: Optional[str] = None
+
+
 # ============ 評論相關 Schema ============
 
 class CommentCreateSchema(Schema):
