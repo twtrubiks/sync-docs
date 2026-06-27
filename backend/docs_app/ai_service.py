@@ -19,6 +19,8 @@ from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
 
+from .schemas import ProofreadResult
+
 logger = logging.getLogger('docs_app')
 
 # 生成參數（temperature 偏低求穩定；max_tokens 預留較長回覆；timeout 防外部服務卡死）
@@ -26,6 +28,11 @@ AI_TEMPERATURE = 0.6
 AI_MAX_TOKENS = 2048
 AI_TIMEOUT_SECONDS = 60.0
 SYSTEM_PROMPT = "你是專業中文寫作助手，一律使用繁體中文。"
+PROOFREAD_SYSTEM_PROMPT = (
+    "你是專業的繁體中文寫作校對助手。請仔細檢查使用者提供的文字，找出用詞、語法、"
+    "流暢度、標點等問題，逐項給出原文片段、建議改寫與原因，並評估整體寫作品質分數（0-100）。"
+    "original 必須與原文完全一致以利前端定位；若文字沒有明顯問題，issues 回傳空陣列並給高分。"
+)
 
 # Prompt 模板
 PROMPTS = {
@@ -54,6 +61,7 @@ PROMPTS = {
 # 共用模型與 agent（惰性建立，避免 import 時就要求 API key）
 _model: Model | None = None
 _agent: Agent | None = None
+_proofread_agent: Agent | None = None
 
 
 def _get_api_key() -> str:
@@ -118,6 +126,18 @@ def _get_agent() -> Agent:
     return _agent
 
 
+def _get_proofread_agent() -> Agent:
+    """惰性建立結構化校對 agent（output_type=ProofreadResult，自動驗證 + 重試）。"""
+    global _proofread_agent
+    if _proofread_agent is None:
+        _proofread_agent = Agent(
+            _get_model(),
+            output_type=ProofreadResult,
+            system_prompt=PROOFREAD_SYSTEM_PROMPT,
+        )
+    return _proofread_agent
+
+
 class AIService:
     """AI 服務（摘要 / 潤稿），底層為 Pydantic AI agent。"""
 
@@ -150,6 +170,36 @@ class AIService:
             raise RuntimeError("AI 服務暫時無法使用")
         except Exception as e:
             logger.error(f"AI unexpected error: {e}")
+            raise RuntimeError(f"AI 處理失敗：{str(e)}")
+
+    async def proofread(self, text: str) -> ProofreadResult:
+        """結構化校對：回傳 ProofreadResult（issues + overall_score）。
+
+        相較 process() 回傳純文字，本方法透過 output_type=ProofreadResult
+        取得型別安全的結構化建議（驗證 / 重試由 Pydantic AI 處理）。
+        """
+        if not text.strip():
+            raise ValueError("Text cannot be empty")
+
+        if not _get_api_key():
+            raise RuntimeError("AI 服務未配置")
+
+        # 限制輸入長度（避免 token 過多）
+        max_chars = 5000
+        if len(text) > max_chars:
+            text = text[:max_chars] + "..."
+
+        try:
+            result = await _get_proofread_agent().run(text)
+            return result.output
+        except ModelHTTPError as e:
+            if getattr(e, "status_code", None) == 429:
+                logger.warning("AI API quota exhausted")
+                raise RuntimeError("API 配額已用盡，請稍後再試")
+            logger.error(f"AI API error: {e}")
+            raise RuntimeError("AI 服務暫時無法使用")
+        except Exception as e:
+            logger.error(f"AI proofread unexpected error: {e}")
             raise RuntimeError(f"AI 處理失敗：{str(e)}")
 
 

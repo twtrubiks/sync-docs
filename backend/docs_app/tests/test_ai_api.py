@@ -14,9 +14,14 @@ from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from docs_app import ai_service as ai_service_module
-from docs_app.ai_service import AIService, _get_agent, _get_model
+from docs_app.ai_service import AIService, _get_agent, _get_model, _get_proofread_agent
 from docs_app.ai_rate_limiter import AIRateLimiter
-from docs_app.schemas import AIProcessRequest, AIProcessResponse
+from docs_app.schemas import (
+    AIProcessRequest,
+    AIProcessResponse,
+    ProofreadResult,
+    WritingIssue,
+)
 
 # 使用 pytest-django 的 db fixture 來確保資料庫在測試之間是乾淨的
 pytestmark = pytest.mark.django_db
@@ -27,9 +32,11 @@ def _reset_ai_globals():
     """每個測試前後重置模組級單例，避免供應商切換互相污染。"""
     ai_service_module._model = None
     ai_service_module._agent = None
+    ai_service_module._proofread_agent = None
     yield
     ai_service_module._model = None
     ai_service_module._agent = None
+    ai_service_module._proofread_agent = None
 
 
 class TestAIService:
@@ -102,6 +109,57 @@ class TestAIService:
     def test_model_is_cached(self):
         """惰性單例：重複呼叫回傳同一實例"""
         assert _get_model() is _get_model()
+
+
+class TestProofread:
+    """結構化校對測試（output_type=ProofreadResult，以 TestModel override agent，不打 API）"""
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_returns_structured_result(self):
+        """回傳型別安全的 ProofreadResult（TestModel 自動產生符合 schema 的輸出）"""
+        with _get_proofread_agent().override(model=TestModel()):
+            result = await AIService().proofread('測試文字')
+
+        assert isinstance(result, ProofreadResult)
+        assert isinstance(result.issues, list)
+        assert 0 <= result.overall_score <= 100
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_custom_output_flows_through(self):
+        """指定結構化輸出時，issues 與分數原樣回傳"""
+        custom = {
+            "issues": [
+                {
+                    "original": "錯字",
+                    "suggestion": "正字",
+                    "reason": "用字錯誤",
+                    "severity": "warning",
+                }
+            ],
+            "overall_score": 80,
+        }
+        with _get_proofread_agent().override(model=TestModel(custom_output_args=custom)):
+            result = await AIService().proofread('一段含錯字的文字')
+
+        assert result.overall_score == 80
+        assert len(result.issues) == 1
+        issue = result.issues[0]
+        assert isinstance(issue, WritingIssue)
+        assert issue.original == "錯字"
+        assert issue.suggestion == "正字"
+        assert issue.severity == "warning"
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_empty_text_error(self):
+        """測試空文字錯誤"""
+        with pytest.raises(ValueError, match="Text cannot be empty"):
+            await AIService().proofread('')
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='')
+    async def test_not_configured_error(self):
+        """測試 API Key 未配置錯誤"""
+        with pytest.raises(RuntimeError, match="AI 服務未配置"):
+            await AIService().proofread('文字')
 
 
 class TestAIRateLimiter:

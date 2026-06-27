@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Optional, Union, Dict, Any, List, Literal
 from ninja import Schema
-from pydantic import field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ============ 用戶相關 Schema ============
@@ -231,6 +231,32 @@ class AIProcessResponse(Schema):
     success: bool
     result: str
     action: str
+    error: Optional[str] = None
+
+
+class WritingIssue(BaseModel):
+    """單一寫作問題的結構化建議（proofread agent 輸出項目）"""
+    original: str = Field(description="原文中有問題的片段，需與原文完全一致以利前端定位")
+    suggestion: str = Field(description="建議改寫後的文字")
+    reason: str = Field(description="為何需要修改的簡短說明")
+    severity: Literal["info", "warning", "error"] = Field(description="嚴重程度")
+
+
+class ProofreadResult(BaseModel):
+    """校對結果（proofread agent 的結構化輸出，由 Pydantic AI 自動驗證 + 重試）"""
+    issues: List[WritingIssue] = Field(description="逐項寫作問題；無問題時為空陣列")
+    overall_score: int = Field(ge=0, le=100, description="整體寫作品質分數（0-100）")
+
+
+class ProofreadRequest(Schema):
+    """AI 校對請求"""
+    text: str  # 最大長度在 ai_service.py 中處理（5000 字元）
+
+
+class ProofreadResponse(Schema):
+    """AI 校對回應（成功時 result 為結構化的 ProofreadResult）"""
+    success: bool
+    result: Optional[ProofreadResult] = None
     error: Optional[str] = None
 
 
