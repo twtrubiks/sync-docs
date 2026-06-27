@@ -5,6 +5,7 @@
 	import QuillEditor from '$lib/components/QuillEditor.svelte';
 	import VersionHistoryPanel from '$lib/components/VersionHistoryPanel.svelte';
 	import AIDialog from '$lib/components/AIDialog.svelte';
+	import AIMetadataDialog from '$lib/components/AIMetadataDialog.svelte';
 	import CommentPanel from '$lib/components/CommentPanel.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { get, put, del, post, logout, refreshAccessToken, type Collaborator } from '$lib/auth';
@@ -23,7 +24,8 @@
 		Plus,
 		UserMinus,
 		TriangleAlert,
-		RefreshCw
+		RefreshCw,
+		ScanText
 	} from '@lucide/svelte';
 
 	// WebSocket Close Codes（與後端對應）
@@ -103,6 +105,10 @@
 	let selectedTextForAI = $state('');
 	let savedSelection = $state<{ index: number; length: number } | null>(null);
 	let savedOriginalText = $state(''); // For conflict detection
+
+	// AI 文件分析（metadata）對話框：作用於整份文件
+	let showMetadataDialog = $state(false);
+	let metadataDocText = $state('');
 
 	async function getCollaborators() {
 		try {
@@ -575,6 +581,20 @@
 		// Changes will be synced to other collaborators via existing WebSocket mechanism
 	}
 
+	// 開啟文件分析（metadata）對話框：以整份文件純文字為輸入
+	function openMetadataDialog() {
+		if (!editor) return;
+
+		const text = editor.getText();
+		if (!text.trim()) {
+			toastWarning('文件目前是空的');
+			return;
+		}
+
+		metadataDocText = text;
+		showMetadataDialog = true;
+	}
+
 	// 還原版本後重新載入文件
 	async function handleVersionRestore() {
 		try {
@@ -677,6 +697,16 @@
 					disabled={!canWrite}
 				>
 					<Sparkles size={20} />
+				</button>
+				<!-- AI 文件分析按鈕 -->
+				<button
+					type="button"
+					class="toolbar-button"
+					onclick={openMetadataDialog}
+					title="文件分析"
+					aria-label="文件分析"
+				>
+					<ScanText size={20} />
 				</button>
 				<!-- 版本歷史按鈕 -->
 				<button
@@ -858,6 +888,9 @@
 
 <!-- AI 對話框 -->
 <AIDialog bind:isOpen={showAIDialog} selectedText={selectedTextForAI} onApply={applyAIResult} />
+
+<!-- AI 文件分析對話框 -->
+<AIMetadataDialog bind:isOpen={showMetadataDialog} documentText={metadataDocText} />
 
 <ConfirmDialog
 	bind:isOpen={showDeleteConfirm}

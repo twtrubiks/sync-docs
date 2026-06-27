@@ -32,6 +32,20 @@ export interface ProofreadResponse {
 	error?: string;
 }
 
+// 文件 metadata
+export interface DocumentMetadata {
+	summary: string;
+	tags: string[];
+	language: string;
+	reading_time: number;
+}
+
+export interface MetadataResponse {
+	success: boolean;
+	result?: DocumentMetadata;
+	error?: string;
+}
+
 // AI 請求超時時間（毫秒）
 const AI_REQUEST_TIMEOUT = 30000;
 
@@ -64,6 +78,21 @@ export async function proofreadWithAI(
 
 	try {
 		return await post('/ai/proofread', { text }, controller?.signal || signal);
+	} finally {
+		if (timeoutId) clearTimeout(timeoutId);
+	}
+}
+
+export async function metadataWithAI(
+	text: string,
+	signal?: AbortSignal
+): Promise<MetadataResponse> {
+	// 若未提供 signal，自動建立超時控制
+	const controller = signal ? null : new AbortController();
+	const timeoutId = controller ? setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT) : null;
+
+	try {
+		return await post('/ai/metadata', { text }, controller?.signal || signal);
 	} finally {
 		if (timeoutId) clearTimeout(timeoutId);
 	}

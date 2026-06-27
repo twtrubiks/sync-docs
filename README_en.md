@@ -56,7 +56,7 @@ Comment System
   * **Cursor Position Display**: Real-time display of collaborators' cursor positions and selections, using the quill-cursors package.
   * **Presence Indicators**: Show which users are currently viewing or editing the document, including usernames and colors.
   * **Rich Text Editing**: A clean and intuitive editor based on [Core Architecture of the Quill.js Delta Format](Delta_en.md), supporting various formatting options.
-  * **AI Writing Assistant**: Integrates LLMs via Pydantic AI (switchable provider: NVIDIA NIM or Google Gemini), providing text summarization and polishing features to enhance writing efficiency.
+  * **AI Writing Assistant**: Integrates LLMs via Pydantic AI (switchable provider: NVIDIA NIM or Google Gemini), providing text summarization, polishing, structured proofreading, and document analysis features to enhance writing efficiency.
   * **Version History**: Automatically saves document versions, allowing users to view history and restore to previous versions.
   * **Comment System**: Add comments and replies to documents, with real-time synchronization for all collaborators.
   * **User Authentication**: Secure user registration and login system.
