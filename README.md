@@ -4,13 +4,13 @@
 [![Django](https://img.shields.io/badge/Django-6.0-green.svg)](https://www.djangoproject.com/)
 [![SvelteKit](https://img.shields.io/badge/SvelteKit-2.x-orange.svg)](https://kit.svelte.dev/)
 [![Svelte](https://img.shields.io/badge/Svelte-5.x-red.svg)](https://svelte.dev/)
-[![Vite](https://img.shields.io/badge/Vite-7.x-purple.svg)](https://vite.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6.x-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-24+-green.svg)](https://nodejs.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
 [![WebSocket](https://img.shields.io/badge/WebSocket-Real--time-orange.svg)](https://channels.readthedocs.io/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-blue.svg)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-8-red.svg)](https://redis.io/)
+[![Pydantic AI](https://img.shields.io/badge/Pydantic_AI-2.0-e92063.svg)](https://ai.pydantic.dev/)
 
 [English Version](README_en.md)
 
@@ -40,7 +40,17 @@ SyncDocs 是一款受 Google Docs 啟發、基於現代技術堆疊打造的網�
 
 文字摘要和潤稿
 
-![文字摘要和潤稿](./screenshots/ai-writing-assistant.png)
+![header](https://cdn.imgpile.com/f/OgrHtFy_xl.png)
+
+![文字摘要和潤稿](https://cdn.imgpile.com/f/WGMDnOV_xl.png)
+
+文件問答 (streaming 輸出)
+
+![文件問答](https://cdn.imgpile.com/f/H911raU_xl.png)
+
+文件分析 (streaming 輸出)
+
+![文件分析](https://cdn.imgpile.com/f/87wpU6B_xl.png)
 
 版本歷史功能
 
@@ -56,7 +66,7 @@ SyncDocs 是一款受 Google Docs 啟發、基於現代技術堆疊打造的網�
 * **游標位置顯示**：即時顯示協作者的游標位置和選取範圍，使用 quill-cursors 套件實現。
 * **在線狀態指示**：顯示目前正在查看或編輯文件的使用者，包含用戶名稱和代表色。
 * **豐富文本編輯**：基於 [Quill.js Delta 的核心技術結構](Delta.md) 的簡潔直觀編輯器，支援多種格式選項。
-* **AI 寫作助手**：以 Pydantic AI 整合 LLM（供應商可切換：NVIDIA NIM 或 Google Gemini），提供文字摘要、潤稿、結構化校對、文件分析與文件問答功能，幫助使用者提升寫作效率。其中摘要與潤稿採 **WebSocket 串流**，逐字即時輸出（打字機效果），可隨時停止生成。
+* **AI 寫作助手**：以 Pydantic AI 整合 LLM（供應商可切換：NVIDIA NIM 或 Google Gemini），提供文字摘要、潤稿、結構化校對、文件分析與文件問答功能，幫助使用者提升寫作效率。其中摘要、潤稿與文件問答採 **WebSocket 串流**，逐字即時輸出（打字機效果），可隨時停止生成。
 * **版本歷史**：自動保存文件版本，可查看歷史紀錄並還原至先前版本。
 * **評論系統**：支援在文件上添加評論和回覆，評論即時同步給所有協作者。
 * **使用者驗證**：安全的用戶註冊和登入系統。
@@ -200,7 +210,7 @@ python manage.py runserver
 * 預設連接 `django-postgres:5432`（適合 Docker）
 * 本地開發需修改 `POSTGRES_HOST=localhost`
 
-可用的環境變數請參考 `backend/.env.example`。
+可用的環境變數請參考根目錄 `.env.example`。
 
 ## 2. 前端設定
 

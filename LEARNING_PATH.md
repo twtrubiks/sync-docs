@@ -11,6 +11,7 @@
 - SvelteKit 全端框架應用
 - JWT 認證機制
 - 富文本編輯器整合（Quill.js）
+- Pydantic AI 整合 LLM（結構化輸出、依賴注入、串流）
 - Docker 容器化部署
 
 ---
@@ -49,11 +50,19 @@
        └─ 狀態管理                └─ 協作同步
                                        │
                                        ▼
-第五階段: 整合與測試        第六階段: 部署與優化
+第五階段: 整合與測試        第六階段: AI 整合
        │                          │
-       ├─ 前後端整合              ├─ Docker
-       ├─ 錯誤處理                ├─ 生產環境配置
-       └─ 測試編寫                └─ 效能優化
+       ├─ 前後端整合              ├─ Pydantic AI
+       ├─ 錯誤處理                ├─ 結構化輸出
+       └─ 測試編寫                ├─ 依賴注入 / 工具
+                                  └─ WebSocket 串流
+                                       │
+                                       ▼
+              第七階段: 部署與優化
+                     │
+                     ├─ Docker
+                     ├─ 生產環境配置
+                     └─ 效能優化
 ```
 
 ---
@@ -321,7 +330,71 @@ Document.objects.filter(owner=user)
 
 ---
 
-## 第六階段：部署與優化
+## 第六階段：AI 整合（Pydantic AI）
+
+### 階段目標
+理解如何用 Pydantic AI 把 LLM 能力整合進應用，並掌握純文字、結構化輸出、依賴注入與串流四種模式。
+
+### 學習內容
+
+**6.1 AI 服務層與供應商切換**
+- 閱讀檔案：`backend/docs_app/ai_service.py`、`backend/backend/settings.py`（`AI_PROVIDER` 相關）
+- 先閱讀：`README.md` 的「AI 供應商設定」段落
+- 關鍵概念：
+  - Pydantic AI Agent 抽象：同一份程式碼接 NVIDIA NIM（OpenAI 相容端點）或 Gemini（Google 原生 SDK）
+  - 惰性初始化（lazy init）：model / agent 首次使用才建立，避免 import 時就要求 API key
+  - 為什麼用全域單例共用 model（不重複建立連線）
+  - 輸入截斷（≤5000 字元）控制 token 成本
+
+**6.2 純文字處理（摘要 / 潤稿）**
+- 閱讀檔案：`backend/docs_app/ai_api.py`（`process_text`）、`ai_service.py`（`process`）
+- 關鍵概念：
+  - `PROMPTS` 模板組合
+  - `agent.run()` 回傳純文字 `result.output`
+  - 錯誤處理：429 配額用盡 vs 服務暫時無法使用 vs 未配置
+
+**6.3 結構化輸出（校對 / 文件分析）**
+- 閱讀檔案：`ai_service.py`（`proofread`、`generate_metadata`）、`schemas.py`（`ProofreadResult`、`DocumentMetadata`）
+- 關鍵概念：
+  - `output_type=PydanticModel` 取得型別安全的結構化結果（自動驗證 + 重試）
+  - 同一個 pydantic model 既當 agent 輸出、又當 API 回應 schema
+  - 相較純文字，結構化輸出讓前端能逐項渲染（校對建議、metadata 欄位）
+
+**6.4 依賴注入與工具（文件問答）**
+- 閱讀檔案：`ai_service.py`（`ask`、`DocDeps`、`get_document_text` 工具）、`ai_api.py`（`ask_document`）
+- 關鍵概念：
+  - `deps_type=DocDeps` 把整份文件當依賴注入
+  - `@agent.tool` 讓 agent 主動呼叫工具讀取文件內容（`RunContext.deps`）
+  - 與直接把文件塞進 prompt 的差異：工具模式讓模型自行決定何時取用
+
+**6.5 WebSocket AI 串流（打字機效果）**
+- 閱讀檔案：`ai_service.py`（`process_stream`、`ask_stream`）、`consumers.py`（`ai_stream` / `ai_ask_stream` / `ai_stream_cancel`）
+- 閱讀檔案：`frontend/src/lib/components/AIDialog.svelte`、`AIAskDialog.svelte`、文件頁 `+page.svelte`（`ai_stream_*` 訊息）
+- 關鍵概念：
+  - 為什麼串流走既有 `DocConsumer`（複用 JWT 認證與限流）而非 HTTP
+  - `agent.run_stream()` + `stream_text(delta=True)` 逐塊 yield（摘要/潤稿走 `process_stream`，文件問答走 `ask_stream`，後者複用 deps + 工具的 doc agent）
+  - chunk 只回給發送者本人（`self.send`，不經 `group_send`）
+  - 摘要/潤稿與文件問答共用 consumer 的泛用串流封裝 `_run_ai_stream()`，差別只在串流來源與輸入驗證
+  - 可取消的背景 asyncio 任務：使用者停止生成 / 斷線時清理
+  - 與 HTTP `/ai/process` 共用同一 Redis 速率限制額度
+
+**6.6 速率限制與測試**
+- 閱讀檔案：`backend/docs_app/ai_rate_limiter.py`、`tests/test_ai_api.py`
+- 關鍵概念：
+  - 四個 HTTP 端點 + 串流共用額度鍵 `ai:{user_id}`（每用戶 10 次 / 60 秒）
+  - fail-open 策略（與 WebSocket 連接管理 fail-closed 的差異與理由）
+  - 測試以 `TestModel` / `FunctionModel` + `agent.override()` 取代對 SDK 內部的脆弱 mock
+
+### 階段檢查點
+- [ ] 能說明 Pydantic AI 如何用同一份程式碼切換不同 LLM 供應商
+- [ ] 理解 `output_type` 結構化輸出相較純文字回傳的優勢
+- [ ] 能解釋文件問答為何用依賴注入 + 工具，而非直接把文件塞進 prompt
+- [ ] 理解 AI 串流為什麼走 WebSocket 而非 HTTP
+- [ ] 能說明 AI 速率限制為何採 fail-open
+
+---
+
+## 第七階段：部署與優化
 
 這個階段是可選的，適合想深入了解生產環境的學習者。
 
@@ -359,6 +432,11 @@ Document.objects.filter(owner=user)
 - [ ] WebSocket 和 HTTP 有什麼根本區別？
 - [ ] Channel Layer 的作用是什麼？
 - [ ] 如何避免 Delta 的無限循環？
+
+### AI 整合
+- [ ] Pydantic AI 如何用同一份程式碼切換不同 LLM 供應商？
+- [ ] `output_type` 結構化輸出帶來什麼好處？
+- [ ] 文件問答為什麼用依賴注入 + 工具，而非直接把文件塞進 prompt？
 
 ---
 

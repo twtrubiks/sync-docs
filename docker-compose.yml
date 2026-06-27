@@ -41,6 +41,14 @@ services:
         - NVIDIA_MODEL=${NVIDIA_MODEL:-nvidia/nemotron-3-super-120b-a12b}
         - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
         - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3-flash-preview}
+        # WebSocket 安全配置（選填，預設值與 settings.py 一致）
+        - WEBSOCKET_MAX_MESSAGE_SIZE=${WEBSOCKET_MAX_MESSAGE_SIZE:-262144}
+        - WEBSOCKET_MAX_OPS_COUNT=${WEBSOCKET_MAX_OPS_COUNT:-1000}
+        - WEBSOCKET_MAX_CONNECTIONS_PER_USER=${WEBSOCKET_MAX_CONNECTIONS_PER_USER:-5}
+        - WEBSOCKET_RATE_LIMIT_MESSAGES=${WEBSOCKET_RATE_LIMIT_MESSAGES:-30}
+        - WEBSOCKET_RATE_LIMIT_WINDOW=${WEBSOCKET_RATE_LIMIT_WINDOW:-10}
+        # 生產環境 SSL（選填，僅在 DJANGO_DEBUG=False 時生效）
+        - SECURE_SSL_REDIRECT=${SECURE_SSL_REDIRECT:-True}
       depends_on:
         - django-postgres
         - django-redis

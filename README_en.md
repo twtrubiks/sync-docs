@@ -4,13 +4,13 @@
 [![Django](https://img.shields.io/badge/Django-6.0-green.svg)](https://www.djangoproject.com/)
 [![SvelteKit](https://img.shields.io/badge/SvelteKit-2.x-orange.svg)](https://kit.svelte.dev/)
 [![Svelte](https://img.shields.io/badge/Svelte-5.x-red.svg)](https://svelte.dev/)
-[![Vite](https://img.shields.io/badge/Vite-7.x-purple.svg)](https://vite.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6.x-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-24+-green.svg)](https://nodejs.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
 [![WebSocket](https://img.shields.io/badge/WebSocket-Real--time-orange.svg)](https://channels.readthedocs.io/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-blue.svg)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-8-red.svg)](https://redis.io/)
+[![Pydantic AI](https://img.shields.io/badge/Pydantic_AI-2.0-e92063.svg)](https://ai.pydantic.dev/)
 
 [中文版](README.md)
 
@@ -40,7 +40,17 @@ Presence Indicators and Cursor Position Display
 
 AI Writing Assistant
 
-![AI Writing Assistant](./screenshots/ai-writing-assistant.png)
+![header](https://cdn.imgpile.com/f/OgrHtFy_xl.png)
+
+![Text Summarization and Polishing](https://cdn.imgpile.com/f/WGMDnOV_xl.png)
+
+Document Q&A (streaming output)
+
+![Document Q&A](https://cdn.imgpile.com/f/H911raU_xl.png)
+
+Document Analysis (streaming output)
+
+![Document Analysis](https://cdn.imgpile.com/f/87wpU6B_xl.png)
 
 Version History
 
@@ -56,7 +66,7 @@ Comment System
   * **Cursor Position Display**: Real-time display of collaborators' cursor positions and selections, using the quill-cursors package.
   * **Presence Indicators**: Show which users are currently viewing or editing the document, including usernames and colors.
   * **Rich Text Editing**: A clean and intuitive editor based on [Core Architecture of the Quill.js Delta Format](Delta_en.md), supporting various formatting options.
-  * **AI Writing Assistant**: Integrates LLMs via Pydantic AI (switchable provider: NVIDIA NIM or Google Gemini), providing text summarization, polishing, structured proofreading, document analysis, and document Q&A features to enhance writing efficiency. Summarization and polishing are **streamed over WebSocket**, rendering token-by-token (typewriter effect) and can be stopped at any time.
+  * **AI Writing Assistant**: Integrates LLMs via Pydantic AI (switchable provider: NVIDIA NIM or Google Gemini), providing text summarization, polishing, structured proofreading, document analysis, and document Q&A features to enhance writing efficiency. Summarization, polishing, and document Q&A are **streamed over WebSocket**, rendering token-by-token (typewriter effect) and can be stopped at any time.
   * **Version History**: Automatically saves document versions, allowing users to view history and restore to previous versions.
   * **Comment System**: Add comments and replies to documents, with real-time synchronization for all collaborators.
   * **User Authentication**: Secure user registration and login system.
@@ -200,7 +210,7 @@ For local development, Django uses default values in `settings.py`:
 * Default connection to `django-postgres:5432` (for Docker)
 * For local development, modify `POSTGRES_HOST=localhost`
 
-See `backend/.env.example` for available environment variables.
+See the root `.env.example` for available environment variables.
 
 ## 2. Frontend Setup
 

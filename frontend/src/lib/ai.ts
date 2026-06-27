@@ -56,6 +56,8 @@ export interface AskResponse {
 // AI 請求超時時間（毫秒）
 const AI_REQUEST_TIMEOUT = 30000;
 
+// 註：摘要/潤稿已改走 WebSocket 串流逐字輸出（DocConsumer 的 ai_stream，commit 0e0c775），
+// 前端 UI 不再呼叫此函式。保留為 REST 對等 API（後端有測試），暫不移除以縮小改動範圍。
 export async function processWithAI(
 	request: AIProcessRequest,
 	signal?: AbortSignal
@@ -105,6 +107,8 @@ export async function metadataWithAI(
 	}
 }
 
+// 註：文件問答已改走 WebSocket 串流逐字輸出（DocConsumer 的 ai_ask_stream，commit 952e0e7），
+// 前端 UI 不再呼叫此函式。保留為 REST 對等 API（後端有測試），暫不移除以縮小改動範圍。
 export async function askWithAI(
 	question: string,
 	documentText: string,

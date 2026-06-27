@@ -32,6 +32,8 @@ AI_RATE_LIMIT_WINDOW = 60    # 時間窗口（秒）
 @api_controller("/ai", tags=["ai"], auth=AsyncJWTAuth(), permissions=[IsAuthenticated])
 class AIController:
 
+    # 註：摘要/潤稿前端已改走 WebSocket 串流逐字輸出（consumers.py 的 ai_stream），
+    # 此 HTTP 端點不再被前端呼叫；保留為 REST 對等 API（有測試 test_ai_api.py），暫不移除。
     @http_post("/process", response=AIProcessResponse)
     async def process_text(self, payload: AIProcessRequest):
         """AI 文字處理（摘要/潤稿）"""
@@ -120,6 +122,8 @@ class AIController:
         except RuntimeError as e:
             return MetadataResponse(success=False, error=str(e))
 
+    # 註：文件問答前端已改走 WebSocket 串流逐字輸出（consumers.py 的 ai_ask_stream），
+    # 此 HTTP 端點不再被前端呼叫；保留為 REST 對等 API（有測試 test_ai_api.py），暫不移除。
     @http_post("/ask", response=AskResponse)
     async def ask_document(self, payload: AskRequest):
         """AI 文件問答（依據整份文件內容回答問題）"""

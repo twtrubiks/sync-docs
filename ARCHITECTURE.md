@@ -42,7 +42,7 @@ SyncDocs 是一個**教學型**的即時協作文件編輯器，展示了現代�
 │  4. 即時協作      │ WebSocket、Delta 同步、廣播、游標位置、在線狀態 │
 │  5. 自動保存      │ Debounce、狀態管理                     │
 │  6. 版本歷史      │ 完整快照、版本列表、還原版本              │
-│  7. AI 寫作助手   │ 文字摘要、潤稿、Gemini API              │
+│  7. AI 寫作助手   │ 文字摘要、潤稿、校對、分析、問答（Pydantic AI） │
 │  8. 評論系統      │ 評論、回覆、即時同步、權限控制             │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -113,8 +113,8 @@ SyncDocs 是一個**教學型**的即時協作文件編輯器，展示了現代�
 | **前端** | Node.js | 24.x | 運行環境 |
 | | SvelteKit | 2.x | 全端框架 |
 | | Svelte | 5.x | UI 框架 |
-| | Vite | 7.x | 開發伺服器 & 打包工具 |
-| | TypeScript | 5.x | 型別安全 |
+| | Vite | 8.x | 開發伺服器 & 打包工具 |
+| | TypeScript | 6.x | 型別安全 |
 | | Quill.js | 2.x | 富文本編輯器 |
 | | Tailwind CSS | 4.x | 樣式框架 |
 | | @lucide/svelte | 1.x | 圖標庫 |
@@ -122,14 +122,14 @@ SyncDocs 是一個**教學型**的即時協作文件編輯器，展示了現代�
 | | Django | 6.0 | Web 框架 |
 | | Django Ninja | 1.6 | API 框架 |
 | | Django Channels | 4.x | WebSocket |
-| | Google Gen AI | 1.0+ | AI 功能 |
+| | Pydantic AI | 2.0 | AI 框架（供應商可切換 NVIDIA NIM / Gemini） |
 | **數據** | PostgreSQL | 18 | 主資料庫 |
 | | Redis | 8-alpine | 快取 & Channel Layer |
 | **部署** | Docker | latest | 容器化 |
 | | Docker Compose | latest | 編排（override 機制區分開發/生產） |
 | | Daphne | 4.x | ASGI 伺服器（生產環境，支援 HTTP + WebSocket） |
 | **測試** | pytest | 9.x | 後端測試框架 |
-| | Vitest | 3.x | 前端測試框架 |
+| | Vitest | 4.x | 前端測試框架 |
 
 ---
 
@@ -317,64 +317,75 @@ SyncDocs 是一個**教學型**的即時協作文件編輯器，展示了現代�
 
 ### 4. AI 寫作助手流程
 
+AI 功能以 **Pydantic AI** 串接 LLM，依 `AI_PROVIDER` 在 **NVIDIA NIM**（OpenAI 相容端點）與 **Google Gemini**（原生 SDK）間切換；底層 model 與各 agent 皆惰性建立（首次使用才需 API key），全域單例共用。
+
 ```
-用戶在編輯器中選取文字，選擇「摘要」或「潤稿」
+用戶在編輯器中選取文字（或整份文件），選擇 AI 功能
 ─────────────────────────────────────────────────
 
 ┌─────────┐                                    ┌──────────────┐
-│ 前端    │  POST /api/ai/process              │  AIController│
-│ AI      │  {action: "summarize"|"polish",    ├──────────────┤
-│ Dialog  │   text: "選取的文字"}              │              │
-├─────────┤                                    │ 1. JWT 認證  │
-│         ├───────────────────────────────────▶│              │
-│ 30s     │                                    │ 2. 速率限制  │
-│ 超時    │                                    │   (Redis)    │
-│ 控制    │                                    │              │
-│         │                                    └──────┬───────┘
-│         │                                           │
+│ 前端     │  POST /api/ai/process              │  AIController │
+│ AI      │       /proofread /metadata /ask    ├──────────────┤
+│ Dialog  │  {action / text / question ...}    │ 1. JWT 認證   │
+├─────────┤                                    │ 2. 速率限制   │
+│ 30s     ├───────────────────────────────────▶│   (Redis)    │
+│ 超時     │                                    └──────┬───────┘
+│ 控制     │                                           │
 │         │                                    ┌──────▼───────┐
 │         │                                    │  AIService   │
 │         │                                    ├──────────────┤
-│         │                                    │ 1. 截斷輸入  │
-│         │                                    │   (≤5000字元)│
-│         │                                    │ 2. 組合 Prompt│
-│         │                                    │ 3. 呼叫 API  │
+│         │                                    │ 1. 截斷輸入    │
+│         │                                    │   (≤5000字元) │
+│         │                                    │ 2. 選對應     │
+│         │                                    │    agent     │
+│         │                                    │ 3. agent.run │
 │         │                                    └──────┬───────┘
 │         │                                           │
-│         │                                    ┌──────▼───────┐
-│         │                                    │ Gemini API   │
-│         │                                    │ (Google)     │
-│         │                                    └──────┬───────┘
-│         │                                           │
+│         │                       ┌───────────────────▼───────────────────┐
+│         │                       │ Pydantic AI Agent                     │
+│         │                       │  ├ NVIDIA NIM（OpenAI 相容端點）        │
+│         │                       │  └ Gemini（Google 原生 SDK）           │
+│         │                       │  依 AI_PROVIDER 切換、各 agent 共用     │
+│         │                       └───────────────────┬───────────────────┘
 │         │◀──────────────────────────────────────────┤
-│         │  {success, result, action}                │
-│ 顯示   │
-│ 結果   │
+│         │  {success, result / answer / ...}         │
+│ 顯示     │
+│ 結果     │
 └─────────┘
 ```
+
+**AI 端點：**
+
+| 端點 | 用途 | 回傳型別 | Pydantic AI 重點 |
+|------|------|---------|------------------|
+| `POST /ai/process` | 摘要 / 潤稿 | 純文字 | 共用 agent；另有 WebSocket 串流版（見下） |
+| `POST /ai/proofread` | 結構化校對（逐項建議 + 整體分數） | `ProofreadResult` | `output_type` 型別安全輸出 + 自動驗證/重試 |
+| `POST /ai/metadata` | 文件分析（摘要 / 標籤 / 語言 / 閱讀時間） | `DocumentMetadata` | `output_type` 結構化輸出 |
+| `POST /ai/ask` | 文件問答 | 純文字答案 | `deps_type` 依賴注入 + `@agent.tool` 讀取文件；另有 WebSocket 串流版（見下） |
 
 **架構要點：**
 
 | 層級 | 檔案 | 職責 |
 |------|------|------|
 | API | `ai_api.py` | 認證、速率限制檢查、回應格式 |
-| 服務 | `ai_service.py` | Prompt 組合、Gemini 呼叫、錯誤處理 |
+| 服務 | `ai_service.py` | Pydantic AI agent 組合、供應商切換、Prompt、錯誤處理 |
 | 速率限制 | `ai_rate_limiter.py` | Redis Sorted Set 滑動窗口 |
 
-**速率限制：** 每用戶 10 次/60 秒，使用 Redis Sorted Set（與 WebSocket 速率限制相同演算法）。AI 速率限制採 fail-open（錯誤時放行），與 WebSocket 連接管理的 fail-closed 策略不同，因為 AI 請求不涉及持續資源佔用。
+**速率限制：** 每用戶 10 次/60 秒，四個 HTTP 端點與 WebSocket 串流共用同一額度鍵 `ai:{user_id}`，使用 Redis Sorted Set（與 WebSocket 速率限制相同演算法）。AI 速率限制採 fail-open（錯誤時放行），與 WebSocket 連接管理的 fail-closed 策略不同，因為 AI 請求不涉及持續資源佔用。
 
-**Gemini Client：** 延遲初始化（lazy init），避免模組載入時 Django settings 未就緒。全域單例，不重複建立連線。
+**Pydantic AI Agent：** 底層 model 與摘要/潤稿、校對、分析、問答各 agent 皆延遲初始化（lazy init），避免模組載入時 Django settings 未就緒；全域單例、共用同一 model（供應商可切換），不重複建立連線。校對與分析以 `output_type` 取得型別安全的結構化結果，問答則以 `deps_type` + `@agent.tool` 注入並讀取整份文件內容。
 
-#### AI 串流（摘要 / 潤稿，走既有 WebSocket）
+#### AI 串流（摘要 / 潤稿 / 文件問答，走既有 WebSocket）
 
-摘要與潤稿改以串流逐字回傳，提升等待體感（time to first token）。為複用既有連線的 JWT 認證與限流，串流走 `DocConsumer`（而非 HTTP），新增 `ai_stream` 訊息類型，chunk **只回傳給發送者本人**（`self.send`，不經 `group_send`），不影響其他協作者。
+摘要、潤稿與文件問答改以串流逐字回傳，提升等待體感（time to first token）。為複用既有連線的 JWT 認證與限流，串流走 `DocConsumer`（而非 HTTP），新增 `ai_stream`（摘要/潤稿）與 `ai_ask_stream`（文件問答）訊息類型，chunk **只回傳給發送者本人**（`self.send`，不經 `group_send`），不影響其他協作者。
 
 ```
-前端送出： {type: "ai_stream", action: "summarize"|"polish", text: "選取的文字"}
+前端送出（摘要/潤稿）： {type: "ai_stream", action: "summarize"|"polish", text: "選取的文字"}
+前端送出（文件問答）： {type: "ai_ask_stream", question: "問題", document_text: "整份文件"}
 前端取消： {type: "ai_stream_cancel"}
 
-後端回傳（僅發送者）：
-  {type: "ai_stream_start", action}          # 開始
+後端回傳（僅發送者，兩種請求共用）：
+  {type: "ai_stream_start", action}          # 開始（文件問答的 action 為 "ask"）
   {type: "ai_stream_chunk", chunk}           # 逐塊文字 delta（多次）
   {type: "ai_stream_end", action}            # 完成
   {type: "ai_stream_error", message}         # 失敗 / 速率限制 / 格式錯誤
@@ -382,7 +393,7 @@ SyncDocs 是一個**教學型**的即時協作文件編輯器，展示了現代�
 
 **要點：**
 
-- **服務層**：`ai_service.process_stream()` 以 `agent.run_stream()` + `result.stream_text(delta=True)` 逐塊 yield，與非串流 `process()` 共用 PROMPTS 與 agent。
+- **服務層**：`ai_service.process_stream()`（摘要/潤稿）與 `ask_stream()`（文件問答，複用 `deps_type` + `@agent.tool` 的 doc agent）皆以 `agent.run_stream()` + `result.stream_text(delta=True)` 逐塊 yield；consumer 的 `_run_ai_stream()` 是兩者共用的泛用串流封裝（負責 start/chunk/end/error）。
 - **速率限制**：與 HTTP `/ai/process` 共用同一 Redis 額度鍵 `ai:{user_id}`（每次串流算一次），同步限流器以 `sync_to_async` 包裝避免阻塞事件迴圈。
 - **取消與資源**：串流為可取消的背景 `asyncio` 任務；使用者按「停止生成」或連線中斷（`disconnect`）時取消，停止生成後續 token。同一連線同時間僅允許一個串流。
 - **權限**：與 HTTP 一致，僅需認證、不要求文件寫入權限（套用結果才走一般 delta 寫入路徑）。
@@ -405,9 +416,9 @@ backend/
     ├── models.py              # 資料模型（Document, Collaborator, Version, Comment）
     ├── api.py                 # 文件 CRUD API
     ├── auth_api.py            # 認證 API（註冊、登入、Token）
-    ├── ai_api.py              # AI API（摘要、潤稿）
+    ├── ai_api.py              # AI API（摘要/潤稿/校對/分析/問答）
     ├── comment_api.py         # 評論 API
-    ├── ai_service.py          # AI 服務層（Gemini 整合）
+    ├── ai_service.py          # AI 服務層（Pydantic AI，供應商可切換）
     ├── redis_pool.py          # 統一 Redis 連接池管理
     ├── ai_rate_limiter.py     # AI 速率限制
     ├── consumers.py           # WebSocket 消費者
@@ -445,7 +456,9 @@ frontend/src/
     │   └── comments.ts        # 評論 API
     ├── components/            # 可複用組件
     │   ├── QuillEditor.svelte # Quill 編輯器
-    │   ├── AIDialog.svelte    # AI 寫作助手對話框
+    │   ├── AIDialog.svelte    # AI 寫作助手（摘要/潤稿/校對）對話框
+    │   ├── AIAskDialog.svelte # AI 文件問答對話框
+    │   ├── AIMetadataDialog.svelte # AI 文件分析對話框
     │   ├── ConfirmDialog.svelte # 統一確認對話框（取代原生 confirm）
     │   ├── VersionHistoryPanel.svelte  # 版本歷史面板
     │   └── CommentPanel.svelte # 評論面板
@@ -616,7 +629,7 @@ class DocumentCollaborator(models.Model):
     # ─────────── 元數據 ───────────
     class Meta:
         constraints = [
-            UniqueConstraint(fields=['document', 'user'], name='unique_document_user'),
+            UniqueConstraint(fields=['document', 'user'], name='unique_document_collaborator'),
         ]
         indexes = [
             Index(fields=['document', 'user']),  # 權限檢查：can_user_access(), can_user_write()
@@ -759,8 +772,9 @@ class JWTAuthMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        # 1. 預處理：認證
-        token = extract_token_from_query(scope)
+        # 1. 預處理：從 WebSocket subprotocol 提取並驗證 JWT
+        subprotocols = scope.get('subprotocols', [])
+        token = extract_token_from_subprotocol(subprotocols)
         scope['user'] = await authenticate(token)
 
         # 2. 調用下一層
@@ -1112,6 +1126,10 @@ CHANNEL_LAYERS = {
 }
 ```
 
+> ⚠️ **版本相依注意（redis-py 必須鎖在 5.x）**
+> `channels-redis` 4.3.0 的接收迴圈每 5 秒會對 channel 做一次阻塞式 `BZPOPMIN`；在 `redis-py` 8.x 下這個阻塞讀會被當成致命的 `Timeout reading from` 拋出，導致 WebSocket consumer 崩潰 → 前端被迫重連 → 連線紀錄在 Redis 累積成殘骸，最終撞上每人連線上限而觸發 `TOO_MANY_CONNECTIONS`（症狀看似「連線數爆滿」，根因卻在版本不相容）。
+> `channels-redis` 4.3.0 僅宣告 `redis>=4.6`（無上限），故 `requirements.txt` 顯式釘 `redis==5.3.1`，待 `channels-redis` 官方支援 redis-py 8.x 再一併升級。
+
 **連接追蹤（SET + TTL）：**
 ```
 Key: ws:connections:user:{user_id}
@@ -1130,7 +1148,7 @@ Type: SORTED SET
 Score: timestamp
 ```
 - 滑動窗口算法，無需定期清理
-- 自動過期機制（窗口 × 2）
+- 自動過期機制（窗口 + 1 秒，略大於窗口確保舊數據被清理）
 
 ---
 
