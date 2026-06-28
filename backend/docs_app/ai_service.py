@@ -344,6 +344,43 @@ class AIService:
             logger.error(f"AI ask unexpected error: {e}")
             raise RuntimeError(f"AI 處理失敗：{str(e)}")
 
+    async def ask_stream(
+        self, question: str, document_text: str = ""
+    ) -> AsyncIterator[str]:
+        """串流版文件問答：agent 透過工具讀取文件後，逐塊 yield 答案 delta。
+
+        與 ask() 共用 doc agent（deps + 工具），差別在以 run_stream 逐塊回傳，
+        供 WebSocket 即時送到前端（打字機效果）。呼叫端取消迭代即停止生成。
+        """
+        if not question.strip():
+            raise ValueError("Question cannot be empty")
+
+        if not _get_api_key():
+            raise RuntimeError("AI 服務未配置")
+
+        # 限制文件長度（避免 token 過多）
+        max_chars = 5000
+        if len(document_text) > max_chars:
+            document_text = document_text[:max_chars] + "..."
+
+        try:
+            async with _get_doc_agent().run_stream(
+                question, deps=DocDeps(document_text=document_text)
+            ) as result:
+                async for chunk in result.stream_text(delta=True):
+                    yield chunk
+        except ModelHTTPError as e:
+            if getattr(e, "status_code", None) == 429:
+                logger.warning("AI API quota exhausted")
+                raise RuntimeError("API 配額已用盡，請稍後再試")
+            logger.error(f"AI API error: {e}")
+            raise RuntimeError("AI 服務暫時無法使用")
+        except (ValueError, RuntimeError):
+            raise
+        except Exception as e:
+            logger.error(f"AI ask stream unexpected error: {e}")
+            raise RuntimeError(f"AI 處理失敗：{str(e)}")
+
 
 # 單例
 ai_service = AIService()

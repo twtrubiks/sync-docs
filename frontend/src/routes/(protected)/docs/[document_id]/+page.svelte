@@ -626,6 +626,19 @@
 		aiStreaming = false;
 	}
 
+	// 啟動 AI 文件問答串流：透過既有 WebSocket 送出問題 + 整份文件，逐字回傳給自己
+	// 與 startAIStream 共用 aiStreaming/aiStreamText 狀態與 ai_stream_* 事件、cancelAIStream
+	function startAskStream(question: string, docText: string): boolean {
+		if (!socket || socket.readyState !== WebSocket.OPEN) {
+			toastError('連線中斷，無法使用 AI 串流');
+			return false;
+		}
+		aiStreamText = '';
+		aiStreaming = true;
+		socket.send(JSON.stringify({ type: 'ai_ask_stream', question, document_text: docText }));
+		return true;
+	}
+
 	// 開啟文件分析（metadata）對話框：以整份文件純文字為輸入
 	function openMetadataDialog() {
 		if (!editor) return;
@@ -651,6 +664,9 @@
 		}
 
 		askDocText = text;
+		// 與摘要/潤稿共用串流狀態，開啟前先重置避免顯示其他對話框殘留的串流文字
+		aiStreamText = '';
+		aiStreaming = false;
 		showAskDialog = true;
 	}
 
@@ -970,7 +986,14 @@
 <AIMetadataDialog bind:isOpen={showMetadataDialog} documentText={metadataDocText} />
 
 <!-- AI 文件問答對話框 -->
-<AIAskDialog bind:isOpen={showAskDialog} documentText={askDocText} />
+<AIAskDialog
+	bind:isOpen={showAskDialog}
+	documentText={askDocText}
+	onAsk={startAskStream}
+	onCancelStream={cancelAIStream}
+	streaming={aiStreaming}
+	streamText={aiStreamText}
+/>
 
 <ConfirmDialog
 	bind:isOpen={showDeleteConfirm}

@@ -395,4 +395,36 @@ class TestDocConsumerAIStream:
             release.set()
             await mock_consumer._ai_stream_task
 
+    async def test_ai_ask_stream_sends_start_chunks_end(self, mock_consumer):
+        """文件問答串流：依序送出 start → chunk(s) → end（action 標籤為 ask）"""
+        async def fake_ask_stream(question, document_text):
+            for c in ['根據', '文件']:
+                yield c
+
+        with patch.object(ai_service, 'ask_stream', fake_ask_stream), \
+                patch.object(ai_rate_limiter, 'is_allowed', return_value=True):
+            await mock_consumer.receive(text_data=json.dumps({
+                'type': 'ai_ask_stream', 'question': '重點是什麼？', 'document_text': '文件內容'
+            }))
+            await mock_consumer._ai_stream_task
+
+        messages = self._sent_messages(mock_consumer)
+        assert [m['type'] for m in messages] == [
+            'ai_stream_start', 'ai_stream_chunk', 'ai_stream_chunk', 'ai_stream_end'
+        ]
+        chunks = [m['chunk'] for m in messages if m['type'] == 'ai_stream_chunk']
+        assert chunks == ['根據', '文件']
+        assert messages[0]['action'] == 'ask'
+
+    async def test_ai_ask_stream_missing_question(self, mock_consumer):
+        """缺少 question：回傳 ai_stream_error（驗證在速率限制之前），不啟動串流任務"""
+        await mock_consumer.receive(text_data=json.dumps({
+            'type': 'ai_ask_stream', 'document_text': '文件內容'
+        }))
+
+        messages = self._sent_messages(mock_consumer)
+        assert len(messages) == 1
+        assert messages[0]['type'] == 'ai_stream_error'
+        assert getattr(mock_consumer, '_ai_stream_task', None) is None
+
 

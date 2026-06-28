@@ -301,6 +301,30 @@ class TestDocQA:
         with pytest.raises(RuntimeError, match="AI 服務未配置"):
             await AIService().ask('問題', '文件內容')
 
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_ask_stream_yields_chunks(self):
+        """串流文件問答：deps + 工具跑通，逐塊 yield 的 delta 拼接後等於完整答案"""
+        with _get_doc_agent().override(model=TestModel(custom_output_text="這是串流答案")):
+            chunks = [
+                c async for c in AIService().ask_stream('文件重點？', '介紹 Docker 的文件')
+            ]
+
+        assert ''.join(chunks) == "這是串流答案"
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_ask_stream_empty_question_error(self):
+        """串流：空問題錯誤（迭代時拋出）"""
+        with pytest.raises(ValueError, match="Question cannot be empty"):
+            async for _ in AIService().ask_stream('', '文件內容'):
+                pass
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='')
+    async def test_ask_stream_not_configured_error(self):
+        """串流：API Key 未配置錯誤"""
+        with pytest.raises(RuntimeError, match="AI 服務未配置"):
+            async for _ in AIService().ask_stream('問題', '文件內容'):
+                pass
+
 
 class TestAIRateLimiter:
     """AI Rate Limiter 單元測試"""

@@ -300,6 +300,13 @@ class AIStreamMessage(Schema):
     text: str  # 最大長度在 ai_service.py 處理（5000 字元）
 
 
+class AIAskStreamMessage(Schema):
+    """WebSocket AI 文件問答串流請求驗證（逐字回傳給發送者本人）"""
+    type: str = "ai_ask_stream"
+    question: str
+    document_text: str = ""  # 整份文件純文字（供 agent 透過工具讀取；最大長度在 ai_service.py 處理）
+
+
 # ============ 評論相關 Schema ============
 
 class CommentCreateSchema(Schema):

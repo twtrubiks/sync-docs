@@ -1,52 +1,46 @@
 <script lang="ts">
-	import { askWithAI } from '$lib/ai';
-	import { toastError, toastWarning } from '$lib/toast';
-	import { X, MessageCircleQuestion, Send } from '@lucide/svelte';
+	import { toastWarning } from '$lib/toast';
+	import { X, MessageCircleQuestion, Send, Square } from '@lucide/svelte';
 
 	let {
 		isOpen = $bindable(false),
-		documentText = ''
+		documentText = '',
+		onAsk = (_question: string, _documentText: string): boolean => false,
+		onCancelStream = () => {},
+		streaming = false,
+		streamText = ''
 	}: {
 		isOpen: boolean;
 		documentText: string;
+		// 問答走 WebSocket 串流（由父層提供）：onAsk 回傳是否成功啟動（連線中斷時為 false）
+		onAsk?: (question: string, documentText: string) => boolean;
+		onCancelStream?: () => void;
+		streaming?: boolean; // 是否正在串流（由父層提供）
+		streamText?: string; // 逐字累積的串流答案（由父層提供）
 	} = $props();
 
 	let question = $state('');
-	let answer = $state('');
-	let loading = $state(false);
 
-	async function handleAsk() {
+	// 透過 WebSocket 串流逐字輸出答案（打字機效果）；狀態由父層提供
+	function handleAsk() {
 		if (!question.trim()) {
 			toastWarning('請先輸入問題');
 			return;
 		}
+		onAsk(question, documentText);
+	}
 
-		loading = true;
-		answer = '';
-
-		try {
-			const response = await askWithAI(question, documentText);
-
-			if (response.success && response.answer !== undefined) {
-				answer = response.answer;
-			} else {
-				toastError(response.error || 'AI 問答失敗');
-			}
-		} catch (error: unknown) {
-			if (error instanceof Error && error.name === 'AbortError') {
-				toastError('Request timed out, please try again');
-			} else {
-				toastError('AI processing request failed');
-			}
-		} finally {
-			loading = false;
-		}
+	function handleStopStream() {
+		onCancelStream();
 	}
 
 	function close() {
+		// 關閉時若仍在串流，請父層取消（避免背景任務繼續產生 token）
+		if (streaming) {
+			onCancelStream();
+		}
 		isOpen = false;
 		question = '';
-		answer = '';
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -101,7 +95,7 @@
 				<button
 					class="bg-cta-500 hover:bg-cta-600 mt-2 flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
 					onclick={handleAsk}
-					disabled={loading || !question.trim()}
+					disabled={streaming || !question.trim()}
 				>
 					<Send size={16} />
 					送出
@@ -109,23 +103,36 @@
 			</div>
 
 			<!-- 答案 -->
-			{#if loading}
+			{#if streaming && !streamText}
 				<div class="flex items-center justify-center py-8">
 					<div
 						class="border-cta-200 border-t-cta-500 h-8 w-8 animate-spin rounded-full border-3"
 					></div>
 					<span class="text-primary-600 ml-3">AI 回答中...</span>
 				</div>
-			{:else if answer}
+			{:else if streamText}
 				<div>
 					<span class="text-primary-700 mb-2 block text-sm font-medium">回答</span>
 					<div
 						class="border-cta-200 bg-cta-50 text-primary-800 max-h-64 overflow-y-auto rounded-lg border p-4 text-sm whitespace-pre-wrap"
 					>
-						{answer}
+						{streamText}{#if streaming}<span class="text-cta-500 animate-pulse">▋</span>{/if}
 					</div>
 				</div>
 			{/if}
 		</div>
+
+		<!-- Footer: 串流中顯示停止鈕 -->
+		{#if streaming}
+			<div class="border-primary-200 flex justify-end gap-3 border-t p-4">
+				<button
+					class="border-primary-300 text-primary-700 hover:bg-primary-50 flex cursor-pointer items-center gap-2 rounded-lg border px-4 py-2 font-medium transition-colors"
+					onclick={handleStopStream}
+				>
+					<Square size={16} />
+					停止生成
+				</button>
+			</div>
+		{/if}
 	</div>
 {/if}

@@ -1,12 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { render, screen, fireEvent } from '@testing-library/svelte';
 import AIAskDialog from './AIAskDialog.svelte';
-
-// Mock AI API
-vi.mock('$lib/ai', () => ({
-	askWithAI: vi.fn()
-}));
 
 // Mock toast
 vi.mock('$lib/toast', () => ({
@@ -19,9 +14,6 @@ vi.mock('$lib/toast', () => ({
 vi.mock('$app/environment', () => ({
 	browser: true
 }));
-
-import { askWithAI } from '$lib/ai';
-import { toastError } from '$lib/toast';
 
 describe('AIAskDialog', () => {
 	beforeEach(() => {
@@ -43,64 +35,68 @@ describe('AIAskDialog', () => {
 		expect(screen.getByPlaceholderText('例如：這份文件的重點是什麼？')).toBeInTheDocument();
 	});
 
-	it('should not call API when question is empty (送出 disabled)', async () => {
+	it('should not call onAsk when question is empty (送出 disabled)', async () => {
+		const onAsk = vi.fn().mockReturnValue(true);
 		render(AIAskDialog, {
-			props: { isOpen: true, documentText: '文件內容' }
+			props: { isOpen: true, documentText: '文件內容', onAsk }
 		});
 
-		// 空問題時送出按鈕為 disabled，點擊不觸發 API
+		// 空問題時送出按鈕為 disabled，點擊不觸發串流
 		await fireEvent.click(screen.getByText('送出'));
 
-		expect(askWithAI).not.toHaveBeenCalled();
+		expect(onAsk).not.toHaveBeenCalled();
 	});
 
-	it('should call askWithAI with question and document text', async () => {
-		vi.mocked(askWithAI).mockResolvedValue({ success: true, answer: '答案' });
-
+	it('should call onAsk with question and document text', async () => {
+		const onAsk = vi.fn().mockReturnValue(true);
 		render(AIAskDialog, {
-			props: { isOpen: true, documentText: '這份文件介紹 Docker' }
+			props: { isOpen: true, documentText: '這份文件介紹 Docker', onAsk }
 		});
 
 		const textarea = screen.getByPlaceholderText('例如：這份文件的重點是什麼？');
 		await fireEvent.input(textarea, { target: { value: '重點是什麼？' } });
 		await fireEvent.click(screen.getByText('送出'));
 
-		expect(askWithAI).toHaveBeenCalledWith('重點是什麼？', '這份文件介紹 Docker');
+		expect(onAsk).toHaveBeenCalledWith('重點是什麼？', '這份文件介紹 Docker');
 	});
 
-	it('should render answer when API succeeds', async () => {
-		vi.mocked(askWithAI).mockResolvedValue({
-			success: true,
-			answer: '這份文件介紹容器化技術'
-		});
-
+	it('should show spinner while streaming with no text yet', () => {
 		render(AIAskDialog, {
-			props: { isOpen: true, documentText: 'Docker 文件' }
+			props: { isOpen: true, documentText: '文件內容', streaming: true, streamText: '' }
 		});
-
-		const textarea = screen.getByPlaceholderText('例如：這份文件的重點是什麼？');
-		await fireEvent.input(textarea, { target: { value: '這是什麼？' } });
-		await fireEvent.click(screen.getByText('送出'));
-
-		await waitFor(() => {
-			expect(screen.getByText('回答')).toBeInTheDocument();
-			expect(screen.getByText('這份文件介紹容器化技術')).toBeInTheDocument();
-		});
+		expect(screen.getByText('AI 回答中...')).toBeInTheDocument();
 	});
 
-	it('should show error toast when API fails', async () => {
-		vi.mocked(askWithAI).mockResolvedValue({ success: false, error: 'Ask error' });
-
+	it('should render streamed answer when streamText provided', () => {
 		render(AIAskDialog, {
-			props: { isOpen: true, documentText: '文件內容' }
+			props: {
+				isOpen: true,
+				documentText: 'Docker 文件',
+				streaming: false,
+				streamText: '這份文件介紹容器化技術'
+			}
 		});
 
-		const textarea = screen.getByPlaceholderText('例如：這份文件的重點是什麼？');
-		await fireEvent.input(textarea, { target: { value: '問題' } });
-		await fireEvent.click(screen.getByText('送出'));
+		expect(screen.getByText('回答')).toBeInTheDocument();
+		expect(screen.getByText(/這份文件介紹容器化技術/)).toBeInTheDocument();
+	});
 
-		await waitFor(() => {
-			expect(toastError).toHaveBeenCalledWith('Ask error');
+	it('should show stop button while streaming and call onCancelStream when clicked', async () => {
+		const onCancelStream = vi.fn();
+		render(AIAskDialog, {
+			props: {
+				isOpen: true,
+				documentText: '文件內容',
+				streaming: true,
+				streamText: '部分答案',
+				onCancelStream
+			}
 		});
+
+		const stopButton = screen.getByText('停止生成');
+		expect(stopButton).toBeInTheDocument();
+
+		await fireEvent.click(stopButton);
+		expect(onCancelStream).toHaveBeenCalled();
 	});
 });
