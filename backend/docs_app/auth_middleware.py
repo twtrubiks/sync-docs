@@ -73,6 +73,13 @@ class JWTAuthMiddleware:
             try:
                 # Decode the token to get user_id
                 payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+
+                # 僅接受 access token：refresh token 同樣以 SECRET_KEY 簽且帶 user_id，
+                # 若不檢查 token_type，7 天壽命的 refresh token 可直接連 WS，
+                # 且會繞過登出時寫入 blacklist 的失效機制
+                if payload.get('token_type') != 'access':
+                    raise jwt.InvalidTokenError('not an access token')
+
                 user_id = payload.get('user_id')
                 user = await get_user(user_id)
 

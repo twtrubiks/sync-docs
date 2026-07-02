@@ -427,4 +427,18 @@ class TestDocConsumerAIStream:
         assert messages[0]['type'] == 'ai_stream_error'
         assert getattr(mock_consumer, '_ai_stream_task', None) is None
 
+    async def test_ai_ask_stream_oversized_payload_rejected_before_parse(self, mock_consumer):
+        """超大 ai_ask_stream payload 在解析與啟動串流前即被大小檢查擋下，
+        不會被完整讀進記憶體，也不會啟動串流任務"""
+        huge_doc = 'x' * (MAX_MESSAGE_SIZE + 1000)
+        await mock_consumer.receive(text_data=json.dumps({
+            'type': 'ai_ask_stream', 'question': '重點？', 'document_text': huge_doc
+        }))
+
+        messages = self._sent_messages(mock_consumer)
+        assert len(messages) == 1
+        assert messages[0]['type'] == 'error'
+        assert messages[0]['error_code'] == 'MESSAGE_TOO_LARGE'
+        assert getattr(mock_consumer, '_ai_stream_task', None) is None
+
 

@@ -91,7 +91,8 @@ def jwt_token_for_read_only_user(read_only_user):
     """生成 read_only_user 的 JWT token"""
     payload = {
         'user_id': read_only_user.id,
-        'username': read_only_user.username
+        'username': read_only_user.username,
+        'token_type': 'access'
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
 
@@ -134,7 +135,8 @@ def jwt_token_for_user(test_user):
     """生成 test_user 的 JWT token"""
     payload = {
         'user_id': test_user.id,
-        'username': test_user.username
+        'username': test_user.username,
+        'token_type': 'access'
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
 
@@ -144,7 +146,8 @@ def jwt_token_for_another_user(another_user):
     """生成 another_user 的 JWT token"""
     payload = {
         'user_id': another_user.id,
-        'username': another_user.username
+        'username': another_user.username,
+        'token_type': 'access'
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
 
@@ -154,7 +157,8 @@ def jwt_token_for_third_user(third_user):
     """生成 third_user 的 JWT token"""
     payload = {
         'user_id': third_user.id,
-        'username': third_user.username
+        'username': third_user.username,
+        'token_type': 'access'
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
 
@@ -181,7 +185,8 @@ def jwt_token_for_nonexistent_user():
     """生成不存在用戶的 JWT token"""
     payload = {
         'user_id': 99999,
-        'username': 'nonexistent'
+        'username': 'nonexistent',
+        'token_type': 'access'
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
 

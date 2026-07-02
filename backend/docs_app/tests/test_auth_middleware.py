@@ -9,7 +9,11 @@ import pytest
 import jwt
 from django.conf import settings
 from django.contrib.auth.models import User, AnonymousUser
-from docs_app.auth_middleware import JWTAuthMiddleware, extract_token_from_subprotocol
+from docs_app.auth_middleware import (
+    JWTAuthMiddleware,
+    extract_token_from_subprotocol,
+    AuthErrorType,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -29,7 +33,19 @@ def valid_jwt_token(test_user):
     """創建有效的JWT token"""
     payload = {
         'user_id': test_user.id,
-        'username': test_user.username
+        'username': test_user.username,
+        'token_type': 'access'
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+
+
+@pytest.fixture
+def refresh_jwt_token(test_user):
+    """創建 refresh token（token_type=refresh），不應被 WS 認證接受"""
+    payload = {
+        'user_id': test_user.id,
+        'username': test_user.username,
+        'token_type': 'refresh'
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
 
@@ -230,3 +246,25 @@ async def test_middleware_with_expired_token_in_subprotocol(expired_jwt_token):
     await middleware(scope, None, None)
 
     assert isinstance(received_scope['user'], AnonymousUser)
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_middleware_rejects_refresh_token(test_user, refresh_jwt_token):
+    """refresh token 同以 SECRET_KEY 簽且帶 user_id，但 token_type 非 access，
+    必須被拒絕（否則 7 天壽命的 refresh token 可繞過黑名單直接連 WS）"""
+    scope = {
+        'type': 'websocket',
+        'subprotocols': [f'access_token.{refresh_jwt_token}'],
+    }
+
+    received_scope = {}
+
+    async def mock_app(scope, receive, send):
+        received_scope.update(scope)
+
+    middleware = JWTAuthMiddleware(mock_app)
+    await middleware(scope, None, None)
+
+    assert isinstance(received_scope['user'], AnonymousUser)
+    assert received_scope['auth_error'] == AuthErrorType.INVALID_TOKEN
+    assert received_scope['accepted_subprotocol'] is None

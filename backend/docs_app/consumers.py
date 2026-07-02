@@ -388,21 +388,35 @@ class DocConsumer(AsyncWebsocketConsumer):
         處理實時編輯的增量更新並廣播給其他用戶
 
         驗證流程：
-        0. 解析 JSON 確定消息類型
-        0a. cursor_move 消息：不計入速率限制，單獨處理
-        0b. 其他消息類型：檢查寫入權限
-        1. 速率限制檢查
-        2. 檢查消息大小限制
-        3. Pydantic Schema 驗證
-        4. 操作數量限制檢查
-        5. 廣播有效的 delta
+        0. 檢查消息大小限制（在解析前，避免大 payload 被完整解析進記憶體）
+        1. 解析 JSON 確定消息類型
+        1a. cursor_move 消息：不計入速率限制，單獨處理
+        2. 其他消息類型：檢查寫入權限
+        3. 速率限制檢查
+        4. Pydantic Schema 驗證
+        5. 操作數量限制檢查
+        6. 廣播有效的 delta
 
         Args:
             text_data: 接收到的JSON格式文本數據
         """
         username = getattr(self.user, 'username', 'Unknown')
 
-        # Step 0: 解析 JSON 確定消息類型
+        # Step 0: 檢查消息大小（在 json.loads 之前，避免大 payload 被完整解析進記憶體；
+        # 涵蓋 cursor_move / ai_stream / ai_ask_stream 等提前 return 的分支）
+        message_size = len(text_data.encode('utf-8'))
+        if message_size > MAX_MESSAGE_SIZE:
+            logger.warning(
+                f"用戶 {username} 發送的消息超過大小限制: "
+                f"{message_size} bytes > {MAX_MESSAGE_SIZE} bytes"
+            )
+            await self._send_error(
+                "MESSAGE_TOO_LARGE",
+                f"Message size ({message_size} bytes) exceeds maximum allowed ({MAX_MESSAGE_SIZE} bytes)"
+            )
+            return
+
+        # Step 1: 解析 JSON 確定消息類型
         try:
             text_data_json = json.loads(text_data)
         except json.JSONDecodeError as e:
@@ -429,7 +443,7 @@ class DocConsumer(AsyncWebsocketConsumer):
             await self.handle_ai_stream_cancel()
             return
 
-        # Step 0b: 檢查寫入權限（非 cursor_move 消息）
+        # Step 2: 檢查寫入權限（非 cursor_move 消息）
         if not self.can_write:
             logger.warning(f"只讀用戶 {username} 嘗試發送 delta 到文檔 {self.document_id}")
             await self._send_error(
@@ -438,7 +452,7 @@ class DocConsumer(AsyncWebsocketConsumer):
             )
             return
 
-        # Step 1: 速率限制檢查（在所有其他驗證之前）
+        # Step 3: 速率限制檢查
         allowed, rate_info = await rate_limiter.is_allowed(
             self.user.id, self.document_id
         )
@@ -450,20 +464,7 @@ class DocConsumer(AsyncWebsocketConsumer):
             )
             return
 
-        # Step 2: 檢查消息大小
-        message_size = len(text_data.encode('utf-8'))
-        if message_size > MAX_MESSAGE_SIZE:
-            logger.warning(
-                f"用戶 {username} 發送的消息超過大小限制: "
-                f"{message_size} bytes > {MAX_MESSAGE_SIZE} bytes"
-            )
-            await self._send_error(
-                "MESSAGE_TOO_LARGE",
-                f"Message size ({message_size} bytes) exceeds maximum allowed ({MAX_MESSAGE_SIZE} bytes)"
-            )
-            return
-
-        # Step 3: Pydantic Schema 驗證（JSON 已在前面解析過）
+        # Step 4: Pydantic Schema 驗證（JSON 已在前面解析過）
         try:
             validated_message = WebSocketMessageSchema(**text_data_json)
             delta = validated_message.delta.model_dump()
