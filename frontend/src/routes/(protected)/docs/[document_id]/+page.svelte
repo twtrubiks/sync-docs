@@ -310,6 +310,30 @@
 						}
 					}
 					break;
+				case 'doc_restored':
+					// 版本已被還原：先清除未送出的編輯狀態，避免 pending 的
+					// debounce PUT / throttle delta 把還原後的內容蓋回去
+					clearTimeout(debounceTimeout);
+					clearTimeout(throttleTimeout);
+					pendingDelta = null;
+					if (data.content) {
+						content = data.content;
+						if (editor) {
+							editor.setContents(content.ops, 'silent');
+						}
+					}
+					lastSavedTime = data.updated_at;
+					saveStatus = 'saved';
+					setTimeout(() => {
+						if (saveStatus === 'saved') saveStatus = 'idle';
+					}, 2000);
+					// 還原者自己已在 VersionHistoryPanel 收到成功 toast，不重複提示
+					if (data.restored_by !== currentUserId) {
+						toastWarning(
+							`${data.restored_by_username} 已將文件還原到版本 ${data.new_version_number}`
+						);
+					}
+					break;
 				case 'cursor_move':
 					// 更新其他用戶的游標
 					quillEditor?.setCursor(data.user_id, data.username, data.color, data.cursor);
@@ -969,6 +993,7 @@
 	{documentId}
 	bind:isOpen={showVersionHistory}
 	onRestore={handleVersionRestore}
+	onlineOthersCount={[...onlineUsers.keys()].filter((id) => id !== currentUserId).length}
 />
 
 <!-- AI 對話框 -->

@@ -192,6 +192,38 @@ describe('VersionHistoryPanel', () => {
 		});
 	});
 
+	it('should warn about online collaborators in restore confirmation', async () => {
+		vi.mocked(getVersionDetail).mockResolvedValue({
+			...mockVersionItems[0],
+			content: { ops: [{ insert: 'test' }] }
+		});
+
+		render(VersionHistoryPanel, {
+			props: {
+				documentId: 'doc-123',
+				isOpen: true,
+				onlineOthersCount: 2
+			}
+		});
+
+		await waitFor(() => {
+			expect(screen.getByText('版本 2')).toBeInTheDocument();
+		});
+
+		await fireEvent.click(screen.getByText('版本 2'));
+
+		await waitFor(() => {
+			expect(screen.getByText('還原到版本 2')).toBeInTheDocument();
+		});
+
+		// 點擊還原按鈕 → 開啟 ConfirmDialog，確認訊息包含線上協作者警告
+		await fireEvent.click(screen.getByText('還原到版本 2'));
+
+		await waitFor(() => {
+			expect(screen.getByText(/目前有 2 位其他協作者在線上/)).toBeInTheDocument();
+		});
+	});
+
 	it('should display created_by_username', async () => {
 		render(VersionHistoryPanel, {
 			props: {

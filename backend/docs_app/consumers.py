@@ -702,6 +702,27 @@ class DocConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.error(f"向用戶 {self.user.username} 發送文檔保存通知失敗: {str(e)}")
 
+    async def doc_restored(self, event):
+        """
+        處理來自房間組的文檔還原消息（由API在還原版本時發送）
+        向組中的所有用戶發送還原後的完整內容，讓 client 重置編輯器
+
+        Args:
+            event: 包含還原後內容與還原者資訊的事件字典
+        """
+        try:
+            await self.send(text_data=json.dumps({
+                'type': 'doc_restored',
+                'content': event['content'],
+                'updated_at': event['updated_at'],
+                'restored_by': event['restored_by'],
+                'restored_by_username': event['restored_by_username'],
+                'new_version_number': event['new_version_number']
+            }))
+            logger.debug(f"向用戶 {self.user.username} 發送文檔還原通知")
+        except Exception as e:
+            logger.error(f"向用戶 {self.user.username} 發送文檔還原通知失敗: {str(e)}")
+
     # ========== 游標與 Presence 功能 ==========
 
     async def handle_cursor_move(self, data):

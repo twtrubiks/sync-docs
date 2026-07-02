@@ -5,6 +5,7 @@
 
 import uuid
 import pytest
+from unittest.mock import patch, MagicMock, AsyncMock
 from ninja_jwt.tokens import AccessToken
 from docs_app.models import DocumentVersion, DocumentCollaborator, PermissionLevel
 
@@ -205,6 +206,39 @@ class TestVersionAPI:
         assert response.status_code == 200
         data = response.json()
         assert data['new_version_number'] == 2
+
+    def test_restore_broadcasts_doc_restored(self, auth_client, test_document, test_version, test_user):
+        """測試還原版本時會廣播 doc_restored 事件（含還原後內容）到 WebSocket 頻道組"""
+        original_content = test_document.content.copy()
+        test_document.content = {'ops': [{'insert': 'Modified content\n'}]}
+        test_document.save()
+
+        with patch('docs_app.api.get_channel_layer') as mock_get_channel_layer:
+            mock_channel_layer = MagicMock()
+            # 使用 AsyncMock 正確模擬 async 方法，避免 async_to_sync 警告
+            mock_channel_layer.group_send = AsyncMock()
+            mock_get_channel_layer.return_value = mock_channel_layer
+
+            response = auth_client.post(
+                f'/api/documents/{test_document.id}/versions/{test_version.id}/restore/'
+            )
+            assert response.status_code == 200
+
+            # 驗證 channel_layer.group_send 被調用
+            mock_channel_layer.group_send.assert_called_once()
+            call_args = mock_channel_layer.group_send.call_args[0]
+
+            # 驗證頻道組名稱正確
+            assert call_args[0] == f"doc_{test_document.id}"
+
+            # 驗證事件類型和內容
+            event = call_args[1]
+            assert event["type"] == "doc_restored"
+            assert event["content"] == original_content
+            assert event["restored_by"] == str(test_user.id)
+            assert event["restored_by_username"] == test_user.username
+            assert event["new_version_number"] == 2
+            assert "updated_at" in event
 
     def test_readonly_user_cannot_restore(self, readonly_auth_client, test_document, test_version):
         """測試只讀用戶無法還原"""

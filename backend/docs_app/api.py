@@ -250,6 +250,36 @@ class DocumentController:
         except Exception as e:
             logger.error(f"廣播文檔 {document.id} 保存事件失敗: {str(e)}")
 
+    def _broadcast_document_restored(self, document, restored_by, new_version_number):
+        """
+        向文檔的協作者廣播文檔已還原的事件（payload 帶還原後內容，讓 client 原子性重置編輯器）
+
+        Args:
+            document: 已還原的文檔對象
+            restored_by: 執行還原的用戶
+            new_version_number: 還原後創建的新版本號
+        """
+        try:
+            channel_layer = get_channel_layer()
+            room_group_name = f'doc_{document.id}'
+
+            logger.debug(f"廣播文檔 {document.id} 還原事件到頻道組 {room_group_name}")
+
+            async_to_sync(channel_layer.group_send)(
+                room_group_name,
+                {
+                    "type": "doc_restored",
+                    "content": document.content,
+                    "updated_at": document.updated_at.isoformat(),
+                    "restored_by": str(restored_by.id),
+                    "restored_by_username": restored_by.username,
+                    "new_version_number": new_version_number,
+                },
+            )
+            logger.debug(f"成功廣播文檔 {document.id} 還原事件")
+        except Exception as e:
+            logger.error(f"廣播文檔 {document.id} 還原事件失敗: {str(e)}")
+
     @http_delete("/{document_id}/")
     def delete_document(self, document_id: uuid.UUID):
         """
@@ -476,6 +506,9 @@ class DocumentController:
 
         # 創建新版本記錄
         new_version = DocumentVersion.create_version(document, user)
+
+        # 廣播還原事件，讓所有在線協作者同步到還原後的內容
+        self._broadcast_document_restored(document, user, new_version.version_number)
 
         logger.info(f"用戶 {user.username} 將文檔 {document_id} 還原到版本 {version.version_number}，創建新版本 {new_version.version_number}")
 

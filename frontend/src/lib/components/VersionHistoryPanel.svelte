@@ -15,9 +15,15 @@
 		documentId: string;
 		isOpen: boolean;
 		onRestore?: () => void;
+		onlineOthersCount?: number;
 	}
 
-	let { documentId, isOpen = $bindable(false), onRestore = () => {} }: Props = $props();
+	let {
+		documentId,
+		isOpen = $bindable(false),
+		onRestore = () => {},
+		onlineOthersCount = 0
+	}: Props = $props();
 
 	let versions = $state<DocumentVersion[]>([]);
 	let loading = $state(false);
@@ -301,7 +307,11 @@
 	bind:isOpen={showRestoreConfirm}
 	title="還原版本"
 	message={selectedVersion
-		? `確定要還原到版本 ${selectedVersion.version_number}？這將覆蓋目前的內容。`
+		? `確定要還原到版本 ${selectedVersion.version_number}？這將覆蓋目前的內容。${
+				onlineOthersCount > 0
+					? `目前有 ${onlineOthersCount} 位其他協作者在線上，他們未儲存的變更也將被覆蓋。`
+					: ''
+			}`
 		: ''}
 	confirmText="還原"
 	variant="warning"
