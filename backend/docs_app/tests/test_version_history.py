@@ -237,6 +237,7 @@ class TestVersionAPI:
             assert event["content"] == original_content
             assert event["restored_by"] == str(test_user.id)
             assert event["restored_by_username"] == test_user.username
+            assert event["restored_to_version"] == 1
             assert event["new_version_number"] == 2
             assert "updated_at" in event
 

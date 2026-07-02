@@ -717,6 +717,7 @@ class DocConsumer(AsyncWebsocketConsumer):
                 'updated_at': event['updated_at'],
                 'restored_by': event['restored_by'],
                 'restored_by_username': event['restored_by_username'],
+                'restored_to_version': event['restored_to_version'],
                 'new_version_number': event['new_version_number']
             }))
             logger.debug(f"向用戶 {self.user.username} 發送文檔還原通知")

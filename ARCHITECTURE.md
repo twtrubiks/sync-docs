@@ -701,6 +701,8 @@ class DocumentVersion(models.Model):
         ]
 ```
 
+**版本還原與多人協作：** 還原 = 用舊版本內容覆蓋 + 創建新版本記錄。還原後 API 會廣播 `doc_restored` 事件（payload 帶還原後的完整內容），所有在線協作者收到後清除 pending 編輯狀態並重置編輯器，避免其他人的 debounce PUT 把還原結果蓋回去。
+
 #### Comment 模型
 
 ```python

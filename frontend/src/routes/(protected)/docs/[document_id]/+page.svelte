@@ -330,7 +330,7 @@
 					// 還原者自己已在 VersionHistoryPanel 收到成功 toast，不重複提示
 					if (data.restored_by !== currentUserId) {
 						toastWarning(
-							`${data.restored_by_username} 已將文件還原到版本 ${data.new_version_number}`
+							`${data.restored_by_username} 已將文件還原到版本 ${data.restored_to_version}`
 						);
 					}
 					break;

@@ -197,7 +197,7 @@ Document.objects.filter(owner=user)
 - 關鍵概念：
   - 側邊面板 UI 設計
   - `$effect()` 監聽 isOpen 變化載入版本
-  - 還原後重新載入文件的流程
+  - 還原透過 `doc_restored` 廣播同步所有在線協作者（清除 pending 編輯狀態 + 重置編輯器），避免其他人的 debounce PUT 把還原結果蓋回去
 
 **3.6 評論面板**
 - 閱讀檔案：`frontend/src/lib/components/CommentPanel.svelte`
