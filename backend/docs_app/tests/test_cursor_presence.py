@@ -291,6 +291,92 @@ class TestCursorPresence:
 
             await comm.disconnect()
 
+    async def test_presence_ttl_per_field_no_ghost_renewal(
+        self, websocket_application, test_document, test_user, jwt_token_for_user
+    ):
+        """
+        測試 presence TTL 掛在各自 field 上（HEXPIRE）：
+        活躍用戶的心跳只續命自己的 field，
+        異常斷線（server crash）殘留的 ghost user 會獨立過期
+        """
+        # 自建獨立 client：redis_pool 的全域 client 會跨測試綁到已關閉的 event loop
+        import redis.asyncio as aioredis
+        from docs_app.redis_pool import _get_host_port
+
+        host, port = _get_host_port()
+        r = aioredis.Redis(host=host, port=port, decode_responses=True)
+
+        with patch('docs_app.consumers.HEARTBEAT_INTERVAL', 0.5):
+            comm = WebsocketCommunicator(
+                websocket_application,
+                f"/ws/docs/{test_document.id}/",
+                subprotocols=[f"access_token.{jwt_token_for_user}"]
+            )
+            await comm.connect()
+            await comm.receive_json_from(timeout=2)  # connection_success
+            await comm.receive_json_from(timeout=2)  # presence_sync
+
+            key = f"presence:{test_document.id}"
+
+            # key 本身不應有 TTL，TTL 應掛在 field 上
+            assert await r.ttl(key) == -1
+            field_ttl = await r.httl(key, str(test_user.id))
+            assert field_ttl[0] > 0
+
+            # 植入 ghost user：模擬異常斷線、最後一次心跳已是 1 秒前的殘留記錄
+            await r.hset(key, 'ghost', json.dumps({'user_id': 'ghost'}))
+            await r.hexpire(key, 1, 'ghost')
+
+            # 等待 ghost field 過期，期間活躍用戶的心跳（0.5s 間隔）持續刷新
+            await asyncio.sleep(1.6)
+
+            users = await r.hgetall(key)
+            assert str(test_user.id) in users, "活躍用戶不應消失"
+            assert 'ghost' not in users, (
+                "ghost user 的 field 應獨立過期，不被其他人的心跳續命"
+            )
+            # 心跳刷新後 key 依然不應有 TTL（防止 EXPIRE 整把 key 的寫法回歸）
+            assert await r.ttl(key) == -1
+
+            await comm.disconnect()
+            await r.aclose()
+
+    async def test_presence_legacy_key_with_key_ttl_rebuilt(
+        self, websocket_application, test_document, test_user, jwt_token_for_user
+    ):
+        """
+        測試舊格式 presence key（TTL 掛在整個 key 上）在用戶加入時被刪除重建，
+        避免舊 key TTL 到期把新加入的用戶一起帶走，也一併清掉舊格式的 ghost
+        """
+        # 自建獨立 client：redis_pool 的全域 client 會跨測試綁到已關閉的 event loop
+        import redis.asyncio as aioredis
+        from docs_app.redis_pool import _get_host_port
+
+        host, port = _get_host_port()
+        r = aioredis.Redis(host=host, port=port, decode_responses=True)
+        key = f"presence:{test_document.id}"
+
+        # 模擬舊版部署留下的資料：field 無 TTL、TTL 掛在 key 上
+        await r.hset(key, 'legacy-ghost', json.dumps({'user_id': 'legacy-ghost'}))
+        await r.expire(key, 300)
+
+        comm = WebsocketCommunicator(
+            websocket_application,
+            f"/ws/docs/{test_document.id}/",
+            subprotocols=[f"access_token.{jwt_token_for_user}"]
+        )
+        await comm.connect()
+        await comm.receive_json_from(timeout=2)  # connection_success
+        await comm.receive_json_from(timeout=2)  # presence_sync
+
+        users = await r.hgetall(key)
+        assert 'legacy-ghost' not in users, "舊格式殘留的 ghost 應在重建時被清除"
+        assert str(test_user.id) in users
+        assert await r.ttl(key) == -1, "重建後 key 不應再有 key 級 TTL"
+
+        await comm.disconnect()
+        await r.aclose()
+
     async def test_cursor_move_invalid_format(
         self, websocket_application, test_document, jwt_token_for_user
     ):

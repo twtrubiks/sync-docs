@@ -272,7 +272,7 @@ Document.objects.filter(owner=user)
 - 關鍵概念：
   - WebSocket 消息類型：`cursor_move`、`user_join`、`user_leave`、`presence_sync`
   - Redis Hash 管理在線用戶（`presence:{document_id}`）
-  - TTL 機制確保活躍用戶不會消失
+  - Field 級 TTL 機制（HEXPIRE）：心跳只續命自己的 field，活躍用戶不會消失，異常斷線殘留的 ghost user 會獨立過期
   - quill-cursors 套件整合（CSS 定位要點）
   - Svelte 5 Map 響應式注意事項（需創建新 Map 觸發更新）
 

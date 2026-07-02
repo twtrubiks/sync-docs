@@ -1143,6 +1143,16 @@ TTL: 300 秒（5 分鐘）
 - 心跳刷新連線與 Presence TTL，防止活躍連線被誤清除
 - 異常斷線時由 TTL 自動清理（無需手動清除）
 
+**在線狀態（HASH + Field TTL）：**
+```
+Key: presence:{document_id}
+Type: HASH
+Fields: {user_id} -> JSON({username, color, channel_name})
+Field TTL: 300 秒（HEXPIRE，Redis >= 7.4）
+```
+- TTL 掛在各自的 field 上，心跳與游標移動只續命自己的記錄
+- 異常斷線（server crash）殘留的 ghost user 會獨立過期，不會被其他人的心跳續命
+
 **速率限制（Sorted Set）：**
 ```
 Key: ws:ratelimit:user:{user_id}:doc:{document_id}

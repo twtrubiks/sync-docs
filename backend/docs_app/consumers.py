@@ -44,9 +44,16 @@ local user_id = ARGV[1]
 local user_data = ARGV[2]
 local ttl = tonumber(ARGV[3])
 
--- 添加/更新用戶
+-- 舊格式殘留（TTL 掛在整個 key 上）：直接刪除重建，
+-- 避免舊 key TTL 到期時把新加入的用戶一起帶走
+if redis.call('TTL', key) > 0 then
+    redis.call('DEL', key)
+end
+
+-- 添加/更新用戶；TTL 掛在各自的 field 上（HEXPIRE，Redis >= 7.4），
+-- 避免異常斷線（server crash）殘留的 ghost user 被其他人的心跳續命而永不過期
 redis.call('HSET', key, user_id, user_data)
-redis.call('EXPIRE', key, ttl)
+redis.call('HEXPIRE', key, ttl, 'FIELDS', 1, user_id)
 
 return 1
 """
@@ -816,7 +823,7 @@ class DocConsumer(AsyncWebsocketConsumer):
                 'color': self.get_user_color(self.user.id),
                 'channel_name': self.channel_name
             })
-            # 使用 user_id 作為 field，5 分鐘過期
+            # 使用 user_id 作為 field，TTL 掛在 field 上（5 分鐘），由各自的心跳續命
             await r.eval(ADD_USER_SCRIPT, 1, key, str(self.user.id), user_data, 300)
         except Exception as e:
             logger.error(f"Failed to add user {self.user.id} to presence: {e}")
@@ -833,11 +840,13 @@ class DocConsumer(AsyncWebsocketConsumer):
             # fail-open: 記錄會在 TTL 後自動清除
 
     async def refresh_presence_ttl(self):
-        """刷新用戶在 presence 列表中的 TTL，確保活躍用戶不會消失"""
+        """刷新用戶自己在 presence hash 中的 field TTL，確保活躍用戶不會消失"""
         try:
             r = await get_async_redis()
             key = f"presence:{self.document_id}"
-            await r.expire(key, 300)  # 刷新 5 分鐘
+            # 只刷新自己的 field（5 分鐘），不碰整個 key，
+            # 避免替異常斷線殘留的 ghost user 續命
+            await r.hexpire(key, 300, str(self.user.id))
         except Exception as e:
             logger.debug(f"Failed to refresh presence TTL: {e}")
             # fail-open: TTL 刷新失敗不影響功能
