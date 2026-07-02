@@ -4,7 +4,7 @@
 """
 
 import uuid
-from django.db import models
+from django.db import models, transaction
 from django.contrib.auth.models import User
 
 
@@ -263,16 +263,21 @@ class DocumentVersion(models.Model):
         Returns:
             DocumentVersion: 新創建的版本
         """
-        # 獲取最新版本號
-        latest = cls.objects.filter(document=document).first()
-        next_version = (latest.version_number + 1) if latest else 1
+        with transaction.atomic():
+            # 鎖定 document 列，序列化同一文檔的版本號分配，
+            # 避免並發請求算出相同版本號而撞 unique_document_version 約束
+            Document.objects.select_for_update().get(pk=document.pk)
 
-        return cls.objects.create(
-            document=document,
-            content=document.content,
-            created_by=user,
-            version_number=next_version
-        )
+            # 獲取最新版本號
+            latest = cls.objects.filter(document=document).first()
+            next_version = (latest.version_number + 1) if latest else 1
+
+            return cls.objects.create(
+                document=document,
+                content=document.content,
+                created_by=user,
+                version_number=next_version
+            )
 
     @classmethod
     def cleanup_old_versions(cls, document, keep_count=50):
