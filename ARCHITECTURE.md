@@ -701,7 +701,7 @@ class DocumentVersion(models.Model):
         ]
 ```
 
-**版本還原與多人協作：** 還原 = 用舊版本內容覆蓋 + 創建新版本記錄。還原後 API 會廣播 `doc_restored` 事件（payload 帶還原後的完整內容），所有在線協作者收到後清除 pending 編輯狀態並重置編輯器，避免其他人的 debounce PUT 把還原結果蓋回去。
+**版本還原與多人協作：** 還原 = 用舊版本內容覆蓋 + 創建新版本記錄。還原後 API 會廣播 `doc_restored` 事件（payload 帶還原後的完整內容），所有在線協作者收到後清除 pending 編輯狀態並重置編輯器，避免其他人的 debounce PUT 把還原結果蓋回去。還原與內容更新一樣會在創建新版本後呼叫 `cleanup_old_versions`，版本數維持在 50 個上限內。
 
 #### Comment 模型
 
@@ -901,19 +901,25 @@ CHANNEL_LAYERS = {
 ```python
 # JWT Token 配置
 NINJA_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),      # 短期有效
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),     # 長期有效
-    'SIGNING_KEY': SECRET_KEY,                        # 簽名密鑰
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),  # 短期有效、無法撤銷，故壽命要短
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),     # 長期有效，可透過黑名單撤銷
+    'ROTATE_REFRESH_TOKENS': True,                   # refresh 時換發新 refresh token
+    'BLACKLIST_AFTER_ROTATION': True,                # 舊 refresh token 立即進黑名單
+    'SIGNING_KEY': SECRET_KEY,                       # 簽名密鑰
 }
 ```
 
 **安全措施：**
 - ✅ Token 簽名防篡改
-- ✅ 過期時間限制
-- ✅ Refresh Token 輪換機制
+- ✅ 過期時間限制：access token 僅 30 分鐘，外洩後的可利用窗口有限
+- ✅ Refresh Token 輪換機制：每次 refresh 換發新 token，舊 token 立即失效（前端須同步保存新 refresh token）
+- ✅ 登出撤銷：登出時前端將 refresh token 送交後端加入黑名單（`ninja_jwt.token_blacklist`），立即失效而非等待過期
 - ✅ Access Token 自動刷新：`apiFetch` 遇到 401 時自動用 Refresh Token 換取新 Access Token 並重試
 - ✅ 併發刷新鎖：使用 `refreshPromise` 防止多個請求同時觸發刷新
 - ✅ WebSocket 使用 Subprotocol 傳遞 Token（不在 URL 中）
+- ✅ 登入/註冊暴力破解防護：以 IP 為 key 的 Redis 滑動窗口限流（`docs_app/throttling.py`），
+  掛在 ninja 操作的 `throttle` 參數上、於 body 解析前執行（ninja_jwt 的密碼驗證發生在
+  schema 驗證階段，限流放端點函數內會漏計失敗的登入嘗試）；超限回 429
 
 ### 2. 權限控制
 
@@ -930,6 +936,13 @@ def _get_document_with_permission_check(self, document_id, user, require_write=F
 # 3. 查詢級別
 Q(owner=user) | Q(collaborators__user=user)  # 資料庫層面過濾
 ```
+
+**WebSocket 權限即時生效：** WS 連線的權限是連線時快照（consumer 的 `self.can_write`）。
+協作者管理 API（新增/更新/移除）變更權限後會廣播 `permission_changed` 事件到文檔頻道組，
+consumer 只對被變更的用戶自己的連線生效：被移除即以 `PERMISSION_DENIED (4003)` 斷線，
+升降權則即時更新 `can_write` 並向 client 發送 `permission_update` 同步 UI。
+沒有這個機制，被移除的協作者既有連線仍可繼續收發編輯，其 delta 甚至會經由其他
+協作者的 debounce PUT 間接落庫，繞過 HTTP 層每次請求都檢查的權限。
 
 ### 3. XSS 防護
 
@@ -974,7 +987,11 @@ cursor.execute(f"SELECT * FROM document WHERE owner={user.id}")  # 危險！
 **前端自動重連機制：**
 - ✅ 指數退避 + 隨機抖動（1s → 2s → 4s...上限 30s）
 - ✅ 最多重連 5 次，超過後提示用戶刷新頁面
-- ✅ 永久性錯誤（4001-4009）和正常關閉（1000/1001）不觸發重連
+- ✅ TOKEN_EXPIRED 的 refresh 後重連走同一套退避與次數上限，
+  避免 token 剛換發又立即被 4002 拒絕（如 clock skew）時無限緊迴圈狂打 refresh 端點
+- ✅ 退避計數器在收到 `connection_success` 時才歸零：後端拒絕連線時會先 accept
+  （為了送錯誤消息）再 close，若在 onopen 歸零，被拒絕的連線也會重置退避
+- ✅ 其他永久性錯誤（4001-4009）和正常關閉（1000/1001）不觸發重連
 - ✅ 重連前清理舊 socket 防止連線洩漏
 - ✅ 重連成功顯示 Connection restored 提示
 
@@ -983,7 +1000,7 @@ cursor.execute(f"SELECT * FROM document WHERE owner={user.id}")  # 危險！
 # 每用戶最多 5 個並發 WebSocket 連接（可配置）
 WEBSOCKET_MAX_CONNECTIONS_PER_USER = 5
 ```
-- ✅ 使用 Redis SET 追蹤活躍連接
+- ✅ 使用 Redis HASH 追蹤活躍連接（TTL 掛在各自的 channel field 上）
 - ✅ Lua 腳本確保原子性操作
 - ✅ 防止單一用戶資源耗盡
 
@@ -995,8 +1012,10 @@ WEBSOCKET_CONNECTION_TTL = 300  # 5 分鐘
 # 心跳間隔（秒）- 刷新活躍連線與 Presence TTL
 WEBSOCKET_HEARTBEAT_INTERVAL = 120  # 2 分鐘
 ```
-- ✅ 自動過期：連線記錄 5 分鐘後自動清除
-- ✅ 心跳刷新：活躍連線每 2 分鐘刷新連線與 Presence TTL
+- ✅ 自動過期：連線記錄的 field TTL 5 分鐘後自動清除
+- ✅ 心跳刷新：活躍連線每 2 分鐘刷新自己 channel field 的連線 TTL 與 Presence TTL
+- ✅ Ghost 連線獨立過期：異常斷線殘留的 channel 不會被同用戶其他連線的心跳續命，
+  不會累積撞 max_connections 誤鎖用戶（與 Presence 同一修法，HEXPIRE per field）
 - ✅ Fail-Closed：Redis 錯誤時拒絕新連線（安全優先）
 - ✅ 重試機制：移除連線時最多重試 3 次（指數退避）
 
@@ -1132,16 +1151,17 @@ CHANNEL_LAYERS = {
 > `channels-redis` 4.3.0 的接收迴圈每 5 秒會對 channel 做一次阻塞式 `BZPOPMIN`；在 `redis-py` 8.x 下這個阻塞讀會被當成致命的 `Timeout reading from` 拋出，導致 WebSocket consumer 崩潰 → 前端被迫重連 → 連線紀錄在 Redis 累積成殘骸，最終撞上每人連線上限而觸發 `TOO_MANY_CONNECTIONS`（症狀看似「連線數爆滿」，根因卻在版本不相容）。
 > `channels-redis` 4.3.0 僅宣告 `redis>=4.6`（無上限），故 `requirements.txt` 顯式釘 `redis==5.3.1`，待 `channels-redis` 官方支援 redis-py 8.x 再一併升級。
 
-**連接追蹤（SET + TTL）：**
+**連接追蹤（HASH + Field TTL）：**
 ```
 Key: ws:connections:user:{user_id}
-Type: SET
-Members: [channel_name_1, channel_name_2, ...]
-TTL: 300 秒（5 分鐘）
+Type: HASH
+Fields: {channel_name} -> 1
+Field TTL: 300 秒（HEXPIRE，Redis >= 7.4）
 ```
-- Lua 腳本確保原子性（檢查 + 添加在同一操作）
-- 心跳刷新連線與 Presence TTL，防止活躍連線被誤清除
-- 異常斷線時由 TTL 自動清理（無需手動清除）
+- Lua 腳本確保原子性（檢查 + 添加在同一操作；偵測舊格式 SET 時刪除重建）
+- 心跳只續命自己 channel 的 field TTL，防止活躍連線被誤清除
+- 異常斷線殘留的 ghost channel 獨立過期，不會被同用戶其他連線的心跳續命
+  而永不過期、累積後撞 max_connections 誤鎖用戶（與 Presence 同一修法）
 
 **在線狀態（HASH + Field TTL）：**
 ```

@@ -116,16 +116,23 @@ Document.objects.filter(owner=user)
 ### 學習內容
 
 **2.1 認證系統**
-- 閱讀檔案：`backend/docs_app/auth_api.py`、`backend/backend/urls.py`
+- 閱讀檔案：`backend/docs_app/auth_api.py`、`backend/docs_app/throttling.py`、`backend/backend/urls.py`
 - 關鍵概念：JWT Token 結構、Access Token vs Refresh Token
 - API 端點來源：
   | 功能 | 端點 | 來源 |
   |------|------|------|
-  | 登入 | `/api/token/pair` | NinjaJWTDefaultController |
-  | 刷新 | `/api/token/refresh` | NinjaJWTDefaultController |
-  | 註冊 | `/api/auth/register` | AuthController (auth_api.py) |
+  | 登入 | `/api/token/pair` | TokenController (auth_api.py，帶 IP 限流) |
+  | 刷新 | `/api/token/refresh` | TokenController（繼承自 NinjaJWTDefaultController） |
+  | 註冊 | `/api/auth/register` | AuthController (auth_api.py，帶 IP 限流) |
   | 登出 | `/api/auth/logout` | AuthController (auth_api.py) |
   | 當前用戶 | `/api/auth/me` | AuthController (auth_api.py) |
+- Token 生命週期設計：
+  - Access token 只有 30 分鐘且無法撤銷；撤銷能力靠 refresh token 黑名單
+  - 登出時前端把 refresh token 送交後端加入黑名單（`ninja_jwt.token_blacklist`），立即失效
+  - `ROTATE_REFRESH_TOKENS`：每次 refresh 換發新 refresh token、舊的進黑名單，
+    前端必須同步保存新 refresh token，否則下次 refresh 直接失敗
+  - 登入/註冊限流掛在 ninja 的 `throttle` 參數上（body 解析前執行）——
+    ninja_jwt 的密碼驗證發生在 schema 驗證階段，限流放端點函數內會漏計失敗的登入嘗試
 - 延伸閱讀：[JWT 介紹](https://jwt.io/introduction)、[Django Ninja JWT](https://eadwincode.github.io/django-ninja-jwt/)
 
 **2.2 Django Ninja Schema**
@@ -140,6 +147,9 @@ Document.objects.filter(owner=user)
 **2.4 協作者管理**
 - 繼續閱讀 `api.py` 的協作者相關端點
 - 理解分享功能的實作
+- 權限變更即時生效：變更/移除協作者時廣播 `permission_changed` 事件，
+  consumer 對被變更用戶的既有 WS 連線即時更新 `can_write` 或直接斷線
+  （WS 權限是連線時快照，不廣播的話被移除者既有連線仍可繼續收發編輯）
 
 **2.5 版本歷史 API**
 - 閱讀檔案：`backend/docs_app/api.py`（版本相關端點）
@@ -248,11 +258,15 @@ Document.objects.filter(owner=user)
   - TOKEN_EXPIRED 處理：前端收到 4002 關閉碼時，先嘗試用 Refresh Token 換新 Access Token 再重連，而非直接登出
 
 **4.4 WebSocket 自動重連機制**
-- 閱讀檔案：`frontend/src/routes/(protected)/docs/[document_id]/+page.svelte` 的 `connectWebSocket`、`getReconnectDelay` 方法
+- 閱讀檔案：`frontend/src/routes/(protected)/docs/[document_id]/+page.svelte` 的 `connectWebSocket`、`scheduleReconnect`、`getReconnectDelay` 方法
 - 關鍵概念：
   - 指數退避 + 隨機抖動（Exponential Backoff + Jitter）避免伺服器雪崩
   - 正常關閉（1000/1001）和永久性錯誤（4001-4008）不重連
   - 暫時性錯誤自動重連，最多 5 次
+  - TOKEN_EXPIRED（4002）refresh 成功後的重連也走同一套退避與次數上限，
+    避免 token 剛換發又立即被拒絕時無限緊迴圈狂打 refresh 端點（自我 DoS）
+  - 退避計數器在收到 `connection_success` 才歸零：後端拒絕連線時會先 accept
+    再 close，若在 onopen 歸零，被拒絕的連線也會重置退避
   - 重連前清理舊 socket 防止連線洩漏
 
 **4.5 Delta 同步邏輯**
@@ -273,6 +287,8 @@ Document.objects.filter(owner=user)
   - WebSocket 消息類型：`cursor_move`、`user_join`、`user_leave`、`presence_sync`
   - Redis Hash 管理在線用戶（`presence:{document_id}`）
   - Field 級 TTL 機制（HEXPIRE）：心跳只續命自己的 field，活躍用戶不會消失，異常斷線殘留的 ghost user 會獨立過期
+  - 連接數追蹤（`ws:connections:user:{user_id}`）採同一機制：TTL 掛在各自的 channel field 上，
+    ghost 連線獨立過期，不會累積撞 max_connections 誤鎖用戶
   - quill-cursors 套件整合（CSS 定位要點）
   - Svelte 5 Map 響應式注意事項（需創建新 Map 觸發更新）
 
