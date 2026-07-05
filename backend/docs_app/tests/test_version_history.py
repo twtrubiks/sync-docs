@@ -241,6 +241,35 @@ class TestVersionAPI:
             assert event["new_version_number"] == 2
             assert "updated_at" in event
 
+    def test_restore_cleans_up_old_versions(self, auth_client, test_document, test_user):
+        """測試還原版本後會清理舊版本，純靠還原不會讓版本數超過 50 上限"""
+        # 直接塞滿 50 個版本（上限值）
+        versions = [
+            DocumentVersion(
+                document=test_document,
+                content={'ops': [{'insert': f'v{i}\n'}]},
+                created_by=test_user,
+                version_number=i,
+            )
+            for i in range(1, 51)
+        ]
+        DocumentVersion.objects.bulk_create(versions)
+        restore_target = DocumentVersion.objects.get(document=test_document, version_number=25)
+
+        response = auth_client.post(
+            f'/api/documents/{test_document.id}/versions/{restore_target.id}/restore/'
+        )
+        assert response.status_code == 200
+
+        # 還原創建了第 51 個版本，清理後應只剩 50 個（最舊的 v1 被刪除）
+        assert DocumentVersion.objects.filter(document=test_document).count() == 50
+        version_numbers = set(
+            DocumentVersion.objects.filter(document=test_document)
+            .values_list('version_number', flat=True)
+        )
+        assert 51 in version_numbers, "還原創建的新版本應存在"
+        assert 1 not in version_numbers, "最舊的版本應被清理"
+
     def test_readonly_user_cannot_restore(self, readonly_auth_client, test_document, test_version):
         """測試只讀用戶無法還原"""
         response = readonly_auth_client.post(

@@ -554,6 +554,9 @@ class DocumentController:
 
         # 創建新版本記錄
         new_version = DocumentVersion.create_version(document, user)
+        # 與 update_document 一致：創建版本後清理舊版本，
+        # 否則純靠還原可讓版本數累積超過上限
+        DocumentVersion.cleanup_old_versions(document, keep_count=50)
 
         # 廣播還原事件，讓所有在線協作者同步到還原後的內容
         self._broadcast_document_restored(
