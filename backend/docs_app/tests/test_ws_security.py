@@ -380,11 +380,110 @@ class TestConnectionManagerUnit:
         with patch.object(manager, 'get_redis', new_callable=AsyncMock) as mock_redis:
             mock_redis_instance = AsyncMock()
             mock_redis.return_value = mock_redis_instance
-            mock_redis_instance.srem = AsyncMock()
-            mock_redis_instance.scard = AsyncMock(return_value=0)
+            mock_redis_instance.hdel = AsyncMock()
+            mock_redis_instance.hlen = AsyncMock(return_value=0)
 
             await manager.remove_connection(1, "channel_1")
-            mock_redis_instance.srem.assert_called_once()
+            mock_redis_instance.hdel.assert_called_once()
+
+
+class TestConnectionManagerFieldTTL:
+    """
+    連接管理器 field 級 TTL 測試（真實 Redis）
+
+    驗證 ghost 連線修復：TTL 掛在各自的 channel field 上（HEXPIRE），
+    異常斷線殘留的 ghost channel 不會被同用戶其他連線的心跳續命，
+    累積後也不會撞 max_connections 誤鎖用戶
+    """
+
+    TEST_USER_ID = 999901  # 避免與其他測試的 user id 衝突
+
+    @pytest.fixture
+    async def redis_client(self):
+        """自建獨立 client：redis_pool 的全域 client 會跨測試綁到已關閉的 event loop"""
+        import redis.asyncio as aioredis
+        from docs_app.redis_pool import _get_host_port
+
+        host, port = _get_host_port()
+        r = aioredis.Redis(host=host, port=port, decode_responses=True)
+        yield r
+        await r.delete(f"ws:connections:user:{self.TEST_USER_ID}")
+        await r.aclose()
+
+    @pytest.fixture
+    async def manager(self, redis_client):
+        """使用獨立 Redis client 的 ConnectionManager"""
+        manager = ConnectionManager()
+        with patch.object(manager, 'get_redis', new_callable=AsyncMock) as mock_get_redis:
+            mock_get_redis.return_value = redis_client
+            await redis_client.delete(f"ws:connections:user:{self.TEST_USER_ID}")
+            yield manager
+
+    async def test_ttl_on_field_not_key(self, manager, redis_client):
+        """測試 TTL 掛在 field 上而非整個 key 上"""
+        key = f"ws:connections:user:{self.TEST_USER_ID}"
+
+        assert await manager.add_connection(self.TEST_USER_ID, "channel_a") is True
+
+        # key 本身不應有 TTL，TTL 應掛在 field 上
+        assert await redis_client.ttl(key) == -1
+        field_ttl = await redis_client.httl(key, "channel_a")
+        assert field_ttl[0] > 0
+
+    async def test_ghost_channel_expires_despite_other_heartbeat(self, manager, redis_client):
+        """測試 ghost channel 獨立過期，不被同用戶其他連線的心跳續命"""
+        key = f"ws:connections:user:{self.TEST_USER_ID}"
+
+        await manager.add_connection(self.TEST_USER_ID, "channel_live")
+        # 植入 ghost：模擬異常斷線殘留、TTL 只剩 1 秒的 channel
+        await manager.add_connection(self.TEST_USER_ID, "channel_ghost")
+        await redis_client.hexpire(key, 1, "channel_ghost")
+
+        # 期間活躍連線持續心跳
+        await asyncio.sleep(0.6)
+        await manager.refresh_connection(self.TEST_USER_ID, "channel_live")
+        await asyncio.sleep(0.6)
+
+        channels = await redis_client.hkeys(key)
+        assert "channel_live" in channels, "活躍連線不應消失"
+        assert "channel_ghost" not in channels, (
+            "ghost channel 應獨立過期，不被其他連線的心跳續命"
+        )
+        # 心跳後 key 依然不應有 key 級 TTL（防止 EXPIRE 整把 key 的寫法回歸）
+        assert await redis_client.ttl(key) == -1
+
+    async def test_expired_ghosts_do_not_lock_out_user(self, manager, redis_client):
+        """測試 ghost 過期後釋放額度，不會累積撞 max_connections 誤鎖用戶"""
+        key = f"ws:connections:user:{self.TEST_USER_ID}"
+
+        # 填滿連接數上限，其中一個是即將過期的 ghost
+        for i in range(manager.max_connections):
+            assert await manager.add_connection(self.TEST_USER_ID, f"channel_{i}") is True
+        await redis_client.hexpire(key, 1, "channel_0")
+
+        # 已達上限，新連接被拒
+        assert await manager.add_connection(self.TEST_USER_ID, "channel_new") is False
+
+        # ghost 過期後額度釋放，新連接可以進來
+        await asyncio.sleep(1.2)
+        assert await manager.add_connection(self.TEST_USER_ID, "channel_new") is True
+
+    async def test_legacy_set_key_rebuilt_on_add(self, manager, redis_client):
+        """測試舊格式 key（SET + key 級 TTL）在添加連接時被刪除重建"""
+        key = f"ws:connections:user:{self.TEST_USER_ID}"
+
+        # 模擬舊版部署留下的資料：SET 格式、TTL 掛在 key 上、塞滿 ghost
+        for i in range(5):
+            await redis_client.sadd(key, f"legacy_ghost_{i}")
+        await redis_client.expire(key, 300)
+
+        # 舊格式下 ghost 塞滿會誤鎖用戶；重建後應可正常連接
+        assert await manager.add_connection(self.TEST_USER_ID, "channel_new") is True
+
+        assert await redis_client.type(key) == 'hash'
+        channels = await redis_client.hkeys(key)
+        assert channels == ["channel_new"], "舊格式殘留的 ghost 應在重建時被清除"
+        assert await redis_client.ttl(key) == -1, "重建後 key 不應再有 key 級 TTL"
 
 
 class TestRateLimiterUnit:

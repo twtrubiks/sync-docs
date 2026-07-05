@@ -66,8 +66,14 @@ class Command(BaseCommand):
         finally:
             await r.aclose()
 
+    async def _get_channels(self, r, key):
+        """取得 key 中的 channel 清單（HASH 格式；相容遷移期殘留的舊格式 SET）"""
+        if await r.type(key) == 'set':
+            return list(await r.smembers(key))
+        return list(await r.hkeys(key))
+
     async def _list_connections(self, r):
-        """List all connection keys and their members"""
+        """List all connection keys and their channels"""
         keys = []
         async for key in r.scan_iter(match='ws:connections:user:*'):
             keys.append(key)
@@ -78,18 +84,23 @@ class Command(BaseCommand):
 
         self.stdout.write(f'\nFound {len(keys)} connection key(s):\n')
         for key in sorted(keys):
-            members = await r.smembers(key)
-            ttl = await r.ttl(key)
+            channels = await self._get_channels(r, key)
             user_id = key.split(':')[-1]
             self.stdout.write(f'  User {user_id}:')
-            self.stdout.write(f'    Connections ({len(members)}): {list(members)}')
-            ttl_str = f'{ttl} seconds' if ttl > 0 else 'no expiry' if ttl == -1 else 'expired'
-            self.stdout.write(f'    TTL: {ttl_str}')
+            self.stdout.write(f'    Connections ({len(channels)}): {channels}')
+            # TTL 掛在各自的 field 上（HEXPIRE），逐一顯示
+            for channel in channels:
+                try:
+                    ttl = (await r.httl(key, channel))[0]
+                    ttl_str = f'{ttl} seconds' if ttl > 0 else 'no expiry' if ttl == -1 else 'expired'
+                except Exception:
+                    ttl_str = 'n/a (legacy set format)'
+                self.stdout.write(f'      {channel}: TTL {ttl_str}')
 
     async def _clear_user(self, r, user_id):
         """Clear connections for a specific user"""
         key = f'ws:connections:user:{user_id}'
-        count = await r.scard(key)
+        count = len(await self._get_channels(r, key))
         if count == 0:
             self.stdout.write(f'No connections found for user {user_id}')
             return
@@ -110,8 +121,7 @@ class Command(BaseCommand):
 
         total_connections = 0
         for key in keys:
-            count = await r.scard(key)
-            total_connections += count
+            total_connections += len(await self._get_channels(r, key))
             await r.delete(key)
 
         self.stdout.write(self.style.SUCCESS(

@@ -16,9 +16,14 @@ class ConnectionManager:
     """
     管理 WebSocket 連接計數和限制
 
-    使用 Redis SET 追蹤每用戶的活躍連接：
+    使用 Redis HASH 追蹤每用戶的活躍連接：
     - Key: ws:connections:user:{user_id}
-    - Value: SET of channel_names
+    - Field: channel_name（TTL 掛在各自的 field 上，HEXPIRE，Redis >= 7.4）
+
+    TTL 掛在 field 而非整個 key 上：心跳只續命自己的連接記錄，
+    異常斷線（server crash）殘留的 ghost channel 會獨立過期，
+    不會被同用戶其他連線的心跳一起續命而永不過期、累積後撞
+    max_connections 上限誤鎖用戶（與 presence 系統同一修法）。
 
     使用 Lua 腳本確保操作原子性
     """
@@ -54,7 +59,7 @@ class ConnectionManager:
         """
         r = await self.get_redis()
         key = self._get_key(user_id)
-        count = await r.scard(key)
+        count = await r.hlen(key)
         return count < self.max_connections
 
     async def add_connection(self, user_id: int, channel_name: str) -> bool:
@@ -80,13 +85,20 @@ class ConnectionManager:
         local max_conn = tonumber(ARGV[2])
         local ttl = tonumber(ARGV[3])
 
-        local count = redis.call('SCARD', key)
+        -- 舊格式殘留（SET + key 級 TTL）：直接刪除重建，
+        -- 順便清掉舊格式累積的 ghost channel
+        if redis.call('TYPE', key).ok == 'set' then
+            redis.call('DEL', key)
+        end
+
+        local count = redis.call('HLEN', key)
         if count >= max_conn then
             return 0
         end
-        redis.call('SADD', key, channel)
-        -- 設置 TTL 過期，防止異常情況下的數據殘留
-        redis.call('EXPIRE', key, ttl)
+        redis.call('HSET', key, channel, 1)
+        -- TTL 掛在 field 上（HEXPIRE，Redis >= 7.4），
+        -- 心跳只續命自己，異常斷線殘留的 ghost channel 獨立過期
+        redis.call('HEXPIRE', key, ttl, 'FIELDS', 1, channel)
         return 1
         """
 
@@ -126,7 +138,7 @@ class ConnectionManager:
             try:
                 r = await self.get_redis()
                 key = self._get_key(user_id)
-                await r.srem(key, channel_name)
+                await r.hdel(key, channel_name)
                 logger.debug(
                     f"用戶 {user_id} 移除連接 {channel_name}，"
                     f"剩餘連接數: {await self.get_connection_count(user_id)}"
@@ -160,7 +172,7 @@ class ConnectionManager:
         try:
             r = await self.get_redis()
             key = self._get_key(user_id)
-            return await r.scard(key)
+            return await r.hlen(key)
         except Exception as e:
             logger.error(f"獲取連接數時發生錯誤: {str(e)}")
             return 0
@@ -185,6 +197,8 @@ class ConnectionManager:
         刷新連接 TTL（心跳用）
 
         當連接活躍時調用此方法延長 TTL，防止活躍連接因 TTL 過期被清除。
+        只刷新自己 channel 的 field TTL，不碰整個 key，
+        避免替異常斷線殘留的 ghost channel 續命。
 
         Args:
             user_id: 用戶 ID
@@ -194,10 +208,9 @@ class ConnectionManager:
             r = await self.get_redis()
             key = self._get_key(user_id)
 
-            # 只有當 channel 存在時才刷新 TTL
-            if await r.sismember(key, channel_name):
-                await r.expire(key, self.CONNECTION_TTL)
-                logger.debug(f"刷新用戶 {user_id} 的連接 TTL")
+            # HEXPIRE 對不存在的 field 不會產生任何效果，無需先檢查存在性
+            await r.hexpire(key, self.CONNECTION_TTL, channel_name)
+            logger.debug(f"刷新用戶 {user_id} 的連接 TTL")
         except Exception as e:
             logger.error(f"刷新連接 TTL 時發生錯誤: {str(e)}")
 
