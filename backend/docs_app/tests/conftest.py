@@ -12,6 +12,18 @@ from django.contrib.auth.models import User
 from docs_app.models import Document, DocumentCollaborator, PermissionLevel
 
 
+@pytest.fixture(autouse=True)
+def _disable_auth_rate_limit(settings):
+    """
+    測試環境預設關閉登入/註冊限流。
+
+    測試套件透過 /api/token/pair 大量登入（authenticated_client 等 fixture），
+    而限流計數存在 Redis、不隨測試資料庫清空，不關閉會讓連續跑測試互相干擾。
+    限流本身的測試會顯式重新開啟此設定。
+    """
+    settings.AUTH_RATE_LIMIT_ENABLED = False
+
+
 @pytest.fixture
 def test_user():
     """創建測試用戶的fixture"""

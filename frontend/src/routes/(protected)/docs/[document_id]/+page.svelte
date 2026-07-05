@@ -206,12 +206,13 @@
 	async function handleWsError(code: number, message?: string) {
 		switch (code) {
 			case WS_CLOSE_CODES.TOKEN_EXPIRED: {
-				// 嘗試用 refresh token 換取新的 access token，成功則自動重連
+				// 嘗試用 refresh token 換取新的 access token，成功則自動重連。
+				// 重連走與暫時性錯誤相同的退避與次數上限：若 token 剛換發又立即
+				// 被 4002 拒絕（如 clock skew），避免無限緊迴圈狂打 refresh 端點
 				const refreshed = await refreshAccessToken();
 				if (refreshed) {
-					console.log('Token refreshed, reconnecting WebSocket...');
-					toastSuccess('Session refreshed.');
-					connectWebSocket();
+					console.log('Token refreshed, scheduling WebSocket reconnect...');
+					scheduleReconnect();
 					return;
 				}
 				// Refresh 也失敗，登出
@@ -254,6 +255,29 @@
 	}
 
 	/**
+	 * 以退避與次數上限排程重連（暫時性斷線與 token 過期重連共用）
+	 * 計數器在收到 connection_success 時才歸零——後端拒絕連線時會先
+	 * accept 再 close，若在 onopen 歸零，被拒絕的連線也會重置退避
+	 */
+	function scheduleReconnect() {
+		if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+			saveStatus = 'error';
+			toastError('Connection lost. Please refresh the page.');
+			return;
+		}
+		const delay = getReconnectDelay();
+		console.log(
+			`Reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})...`
+		);
+		saveStatus = 'connecting';
+		clearTimeout(reconnectTimer);
+		reconnectTimer = setTimeout(() => {
+			reconnectAttempts++;
+			connectWebSocket();
+		}, delay);
+	}
+
+	/**
 	 * 建立 WebSocket 連線（初始連線與重連共用）
 	 */
 	function connectWebSocket() {
@@ -276,11 +300,9 @@
 		socket = new WebSocket(wsUrl, [`access_token.${token}`]);
 
 		socket.onopen = () => {
+			// 注意：後端拒絕連線時也會先 accept（為了送錯誤消息）再 close，
+			// 所以退避計數器不在這裡歸零，等收到 connection_success 才算真正連上
 			console.log('WebSocket connection established');
-			if (reconnectAttempts > 0) {
-				toastSuccess('Connection restored.');
-			}
-			reconnectAttempts = 0;
 			saveStatus = 'idle';
 		};
 
@@ -292,6 +314,10 @@
 					// Update permission from WebSocket connection
 					canWrite = data.can_write;
 					currentUserId = data.user_id;
+					if (reconnectAttempts > 0) {
+						toastSuccess('Connection restored.');
+					}
+					reconnectAttempts = 0;
 					console.log(`WebSocket connected, can_write: ${canWrite}, user_id: ${currentUserId}`);
 					break;
 				case 'permission_update':
@@ -442,21 +468,7 @@
 			}
 
 			// 暫時性錯誤 → 嘗試自動重連
-			if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-				const delay = getReconnectDelay();
-				console.log(
-					`Reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})...`
-				);
-				saveStatus = 'connecting';
-				clearTimeout(reconnectTimer);
-				reconnectTimer = setTimeout(() => {
-					reconnectAttempts++;
-					connectWebSocket();
-				}, delay);
-			} else {
-				saveStatus = 'error';
-				toastError('Connection lost. Please refresh the page.');
-			}
+			scheduleReconnect();
 		};
 
 		socket.onerror = (error) => {

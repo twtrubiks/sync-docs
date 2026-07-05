@@ -51,6 +51,11 @@ export const user = writable<User | null>(null);
 
 // Function to log the user out
 export function logout() {
+	// 盡力而為地在伺服器端撤銷 refresh token（加入黑名單），失敗不阻塞登出流程
+	const storedRefreshToken = browser ? window.localStorage.getItem('refresh_token') : null;
+	if (storedRefreshToken) {
+		void publicPost('/auth/logout', { refresh: storedRefreshToken }).catch(() => {});
+	}
 	token.set(null);
 	refreshToken.set(null);
 	user.set(null);
@@ -80,6 +85,11 @@ export async function refreshAccessToken(): Promise<boolean> {
 
 			const data = await response.json();
 			token.set(data.access);
+			// 後端開啟 ROTATE_REFRESH_TOKENS：refresh 會換發新的 refresh token，
+			// 舊的已進黑名單，必須存新的，否則下次 refresh 會直接失敗被登出
+			if (data.refresh) {
+				refreshToken.set(data.refresh);
+			}
 			return true;
 		} catch {
 			return false;

@@ -354,3 +354,153 @@ def test_user_registration_without_email(client, user_data):
     assert response_data["username"] == user_data["username"]
     # email 應該是 None 或空字串
     assert response_data["email"] in [None, ""]
+
+
+# ===== 登出黑名單與 refresh token 輪換 =====
+
+def login(client, user_data):
+    """輔助函數：登入並回傳 tokens dict"""
+    User.objects.create_user(username=user_data["username"], password=user_data["password"])
+    response = client.post(
+        "/api/token/pair",
+        data=json.dumps({"username": user_data["username"], "password": user_data["password"]}),
+        content_type="application/json"
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+@pytest.mark.django_db
+def test_logout_blacklists_refresh_token(client, user_data):
+    """
+    測試登出後 refresh token 被加入黑名單，無法再換發 access token。
+    """
+    tokens = login(client, user_data)
+
+    # 登出（不需要 access token 認證，refresh token 本身證明身分）
+    response = client.post(
+        "/api/auth/logout",
+        data=json.dumps({"refresh": tokens["refresh"]}),
+        content_type="application/json"
+    )
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+    # 已列入黑名單的 refresh token 無法再刷新
+    response = client.post(
+        "/api/token/refresh",
+        data=json.dumps({"refresh": tokens["refresh"]}),
+        content_type="application/json"
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_logout_with_invalid_refresh_token_is_idempotent(client):
+    """
+    測試用無效 refresh token 登出仍回 200（登出為冪等操作）。
+    """
+    response = client.post(
+        "/api/auth/logout",
+        data=json.dumps({"refresh": "invalid_refresh_token"}),
+        content_type="application/json"
+    )
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+
+@pytest.mark.django_db
+def test_token_refresh_rotates_and_blacklists_old_token(client, user_data):
+    """
+    測試 refresh 時輪換 refresh token：回傳新的 refresh token，
+    舊的 refresh token 立即失效（BLACKLIST_AFTER_ROTATION）。
+    """
+    tokens = login(client, user_data)
+    old_refresh = tokens["refresh"]
+
+    # 第一次 refresh：取得新的 access + 新的 refresh
+    response = client.post(
+        "/api/token/refresh",
+        data=json.dumps({"refresh": old_refresh}),
+        content_type="application/json"
+    )
+    assert response.status_code == 200
+    new_tokens = response.json()
+    assert "access" in new_tokens
+    assert new_tokens["refresh"] != old_refresh
+
+    # 舊 refresh token 已被輪換進黑名單，再用即失敗
+    response = client.post(
+        "/api/token/refresh",
+        data=json.dumps({"refresh": old_refresh}),
+        content_type="application/json"
+    )
+    assert response.status_code == 401
+
+    # 新 refresh token 可以正常使用
+    response = client.post(
+        "/api/token/refresh",
+        data=json.dumps({"refresh": new_tokens["refresh"]}),
+        content_type="application/json"
+    )
+    assert response.status_code == 200
+
+
+# ===== 登入/註冊限流 =====
+
+@pytest.mark.django_db
+def test_login_rate_limited_returns_429(client, settings, monkeypatch):
+    """
+    測試登入限流：限流器拒絕時回 429（throttle 在密碼驗證前執行）。
+    """
+    settings.AUTH_RATE_LIMIT_ENABLED = True
+    monkeypatch.setattr(
+        "docs_app.throttling.ai_rate_limiter.is_allowed",
+        lambda key, max_requests, window_seconds: False
+    )
+
+    response = client.post(
+        "/api/token/pair",
+        data=json.dumps({"username": "any", "password": "any"}),
+        content_type="application/json"
+    )
+    assert response.status_code == 429
+
+
+@pytest.mark.django_db
+def test_register_rate_limited_returns_429(client, settings, monkeypatch):
+    """
+    測試註冊限流：限流器拒絕時回 429。
+    """
+    settings.AUTH_RATE_LIMIT_ENABLED = True
+    monkeypatch.setattr(
+        "docs_app.throttling.ai_rate_limiter.is_allowed",
+        lambda key, max_requests, window_seconds: False
+    )
+
+    response = client.post(
+        "/api/auth/register",
+        data=json.dumps({"username": "newuser", "password": "a-very-strong-password123"}),
+        content_type="application/json"
+    )
+    assert response.status_code == 429
+    assert User.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_login_rate_limit_uses_ip_scoped_key(client, settings, monkeypatch, user_data):
+    """
+    測試登入限流以 login:{ip} 為 key 計數，允許時登入正常。
+    """
+    settings.AUTH_RATE_LIMIT_ENABLED = True
+    recorded_keys = []
+
+    def fake_is_allowed(key, max_requests, window_seconds):
+        recorded_keys.append(key)
+        return True
+
+    monkeypatch.setattr("docs_app.throttling.ai_rate_limiter.is_allowed", fake_is_allowed)
+
+    tokens = login(client, user_data)
+    assert "access" in tokens
+    assert recorded_keys == ["login:127.0.0.1"]

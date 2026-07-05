@@ -17,15 +17,16 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 from ninja_extra import NinjaExtraAPI
-from ninja_jwt.controller import NinjaJWTDefaultController
 from docs_app.api import DocumentController
-from docs_app.auth_api import AuthController
+from docs_app.auth_api import AuthController, TokenController
 from docs_app.ai_api import AIController
 from docs_app.comment_api import CommentController
 
 api = NinjaExtraAPI()
 
-api.register_controllers(NinjaJWTDefaultController)
+# TokenController 繼承 NinjaJWTDefaultController 並對 /token/pair 加登入限流，
+# 不可再直接註冊 NinjaJWTDefaultController（會重複註冊出一組無限流的登入端點）
+api.register_controllers(TokenController)
 api.register_controllers(DocumentController)
 api.register_controllers(AuthController)
 api.register_controllers(AIController)

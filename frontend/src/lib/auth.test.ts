@@ -225,8 +225,10 @@ describe('auth', () => {
 				.mockResolvedValueOnce(createResponse(null, 401, 'Unauthorized'));
 
 			await expect(apiGet('/protected')).rejects.toThrow('Unauthorized');
-			// 3 calls total: original + refresh + retry. No 4th call.
-			expect(mockFetch).toHaveBeenCalledTimes(3);
+			// 4 calls total: original + refresh + retry + logout revocation. No 5th call.
+			expect(mockFetch).toHaveBeenCalledTimes(4);
+			// 第 4 個請求是登出時的 refresh token 撤銷
+			expect(mockFetch.mock.calls[3][0]).toBe('/api/auth/logout');
 			// 重試仍 401 → 登出
 			expect(storeGet(token)).toBeNull();
 			expect(mockGoto).toHaveBeenCalledWith('/login');
@@ -278,6 +280,23 @@ describe('auth', () => {
 			expect(r2).toBe(true);
 			expect(mockFetch).toHaveBeenCalledOnce();
 		});
+
+		it('stores rotated refresh token when response includes one', async () => {
+			// 後端 ROTATE_REFRESH_TOKENS：refresh 回應帶新的 refresh token，
+			// 舊的已進黑名單，必須存新的
+			setStorage('refresh_token', 'old-refresh');
+			vi.clearAllMocks();
+
+			mockFetch.mockResolvedValueOnce(
+				createResponse({ access: 'fresh-token', refresh: 'rotated-refresh' })
+			);
+
+			const success = await refreshAccessToken();
+
+			expect(success).toBe(true);
+			expect(storeGet(token)).toBe('fresh-token');
+			expect(storeGet(refreshToken)).toBe('rotated-refresh');
+		});
 	});
 
 	// ── publicPost ──
@@ -327,6 +346,31 @@ describe('auth', () => {
 			expect(storeGet(token)).toBeNull();
 			expect(storeGet(refreshToken)).toBeNull();
 			expect(storeGet(user)).toBeNull();
+		});
+
+		it('logout sends refresh token to server for revocation', () => {
+			setupAuth('access', 'my-refresh');
+			mockFetch.mockResolvedValueOnce(createResponse({ success: true }));
+
+			logout();
+
+			expect(mockFetch).toHaveBeenCalledOnce();
+			const [url, options] = mockFetch.mock.calls[0];
+			expect(url).toBe('/api/auth/logout');
+			expect(options.method).toBe('POST');
+			expect(JSON.parse(options.body)).toEqual({ refresh: 'my-refresh' });
+			// 撤銷是盡力而為，不阻塞本地登出
+			expect(storeGet(token)).toBeNull();
+		});
+
+		it('logout without refresh token skips server revocation', () => {
+			token.set('access-only');
+			vi.clearAllMocks();
+
+			logout();
+
+			expect(mockFetch).not.toHaveBeenCalled();
+			expect(storeGet(token)).toBeNull();
 		});
 	});
 

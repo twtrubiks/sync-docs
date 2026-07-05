@@ -26,6 +26,11 @@ class RegisterSchema(Schema):
     email: Optional[str] = None
 
 
+class LogoutSchema(Schema):
+    """登出請求模式（refresh token 將被加入黑名單）"""
+    refresh: str
+
+
 # ============ 文檔相關 Schema ============
 
 class ShareRequestSchema(Schema):

@@ -215,10 +215,18 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 NINJA_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
+    # access token 壽命短、無法撤銷；撤銷能力靠 refresh token 黑名單
+    # （登出時 blacklist + 每次 refresh 換發並 blacklist 舊 token）
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
     'SIGNING_KEY': SECRET_KEY,
 }
+
+# 登入/註冊暴力破解防護（以 IP 為 key 的 Redis 滑動窗口，見 docs_app/throttling.py）
+# 測試環境由 conftest.py 的 autouse fixture 關閉
+AUTH_RATE_LIMIT_ENABLED = os.environ.get('AUTH_RATE_LIMIT_ENABLED', 'True') == 'True'
 
 # CORS 配置 - 使用環境變量管理允許的來源
 CORS_ALLOWED_ORIGINS = os.environ.get(
