@@ -282,6 +282,38 @@ class DocumentController:
         except Exception as e:
             logger.error(f"廣播文檔 {document.id} 還原事件失敗: {str(e)}")
 
+    def _broadcast_permission_changed(self, document, user_id, removed=False, can_write=False):
+        """
+        向文檔的頻道組廣播協作者權限變更事件
+
+        WS 連線的權限是連線時快照（consumer 的 self.can_write），
+        不廣播的話被移除/降權的用戶既有連線仍可繼續收發編輯直到自己斷線。
+        consumer 收到此事件後只對 user_id 等於自己的連線生效：
+        removed 即斷線，升降權即時更新 can_write。
+
+        Args:
+            document: 文檔對象
+            user_id: 被變更權限的用戶 ID
+            removed: 是否被移除協作者資格
+            can_write: 變更後是否有寫入權限（removed=True 時忽略）
+        """
+        try:
+            channel_layer = get_channel_layer()
+            room_group_name = f'doc_{document.id}'
+
+            async_to_sync(channel_layer.group_send)(
+                room_group_name,
+                {
+                    "type": "permission_changed",
+                    "user_id": str(user_id),
+                    "removed": removed,
+                    "can_write": can_write,
+                },
+            )
+            logger.debug(f"成功廣播文檔 {document.id} 權限變更事件 (user_id={user_id})")
+        except Exception as e:
+            logger.error(f"廣播文檔 {document.id} 權限變更事件失敗: {str(e)}")
+
     @http_delete("/{document_id}/")
     def delete_document(self, document_id: uuid.UUID):
         """
@@ -349,6 +381,11 @@ class DocumentController:
             existing.save()
             collab = existing
             is_new = False
+            # 既有協作者可能已有在線連線，通知 consumer 即時更新寫入權限
+            self._broadcast_permission_changed(
+                document, user_to_add.id,
+                can_write=(collab.permission == PermissionLevel.WRITE)
+            )
             logger.info(f"用戶 {user.username} 更新協作者 {user_to_add.username} 的權限為 {payload.permission}")
         else:
             collab = DocumentCollaborator.objects.create(
@@ -392,6 +429,12 @@ class DocumentController:
         collab.permission = payload.permission
         collab.save()
 
+        # 通知該用戶的在線連線即時更新寫入權限
+        self._broadcast_permission_changed(
+            document, user_id,
+            can_write=(collab.permission == PermissionLevel.WRITE)
+        )
+
         logger.info(f"用戶 {user.username} 更新協作者 {collab.user.username} 的權限為 {payload.permission}")
 
         return {
@@ -419,6 +462,9 @@ class DocumentController:
         collab = get_object_or_404(DocumentCollaborator, document=document, user_id=user_id)
         username = collab.user.username
         collab.delete()
+
+        # 通知該用戶的在線連線立即斷開，避免被移除後仍可透過既有 WS 連線收發編輯
+        self._broadcast_permission_changed(document, user_id, removed=True)
 
         logger.info(f"用戶 {user.username} 移除協作者 {username}")
         return {"success": True}

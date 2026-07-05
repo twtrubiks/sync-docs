@@ -720,6 +720,106 @@ def test_update_collaborator_permission(authenticated_client, create_user):
     assert response_edit.json()["title"] == "Now can edit"
 
 
+@pytest.fixture
+def shared_doc_for_broadcast(authenticated_client, create_user):
+    """建立已分享（write）的文檔，回傳 (client, owner_token, document_id, collab_user)"""
+    client, _, owner_access_token = authenticated_client
+    collab_user = create_user(username="wscollab", email="wscollab@example.com")
+
+    doc_data = {"title": "Permission Broadcast Doc", "content": {}}
+    response = client.post(
+        DOCUMENTS_ENDPOINT,
+        data=doc_data,
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
+    )
+    document_id = response.json()["id"]
+
+    share_data = {"username": collab_user.username, "permission": "write"}
+    client.post(
+        f"/api/documents/{document_id}/collaborators/",
+        data=json.dumps(share_data),
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
+    )
+    return client, owner_access_token, document_id, collab_user
+
+
+def test_remove_collaborator_broadcasts_permission_changed(shared_doc_for_broadcast):
+    """測試移除協作者時廣播 permission_changed（removed=True）到 WebSocket 頻道組"""
+    client, owner_access_token, document_id, collab_user = shared_doc_for_broadcast
+
+    with patch('docs_app.api.get_channel_layer') as mock_get_channel_layer:
+        mock_channel_layer = MagicMock()
+        mock_channel_layer.group_send = AsyncMock()
+        mock_get_channel_layer.return_value = mock_channel_layer
+
+        response = client.delete(
+            f"/api/documents/{document_id}/collaborators/{collab_user.id}/",
+            HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
+        )
+        assert response.status_code == 200
+
+        mock_channel_layer.group_send.assert_called_once()
+        group_name, event = mock_channel_layer.group_send.call_args[0]
+        assert group_name == f"doc_{document_id}"
+        assert event["type"] == "permission_changed"
+        assert event["user_id"] == str(collab_user.id)
+        assert event["removed"] is True
+
+
+def test_update_permission_broadcasts_permission_changed(shared_doc_for_broadcast):
+    """測試更新協作者權限時廣播 permission_changed（帶新的 can_write）"""
+    client, owner_access_token, document_id, collab_user = shared_doc_for_broadcast
+
+    with patch('docs_app.api.get_channel_layer') as mock_get_channel_layer:
+        mock_channel_layer = MagicMock()
+        mock_channel_layer.group_send = AsyncMock()
+        mock_get_channel_layer.return_value = mock_channel_layer
+
+        # write 降為 read
+        response = client.put(
+            f"/api/documents/{document_id}/collaborators/{collab_user.id}/",
+            data=json.dumps({"permission": "read"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
+        )
+        assert response.status_code == 200
+
+        mock_channel_layer.group_send.assert_called_once()
+        group_name, event = mock_channel_layer.group_send.call_args[0]
+        assert group_name == f"doc_{document_id}"
+        assert event["type"] == "permission_changed"
+        assert event["user_id"] == str(collab_user.id)
+        assert event["removed"] is False
+        assert event["can_write"] is False
+
+
+def test_reshare_existing_collaborator_broadcasts_permission_changed(shared_doc_for_broadcast):
+    """測試對既有協作者重複 POST（變更權限）也會廣播 permission_changed"""
+    client, owner_access_token, document_id, collab_user = shared_doc_for_broadcast
+
+    with patch('docs_app.api.get_channel_layer') as mock_get_channel_layer:
+        mock_channel_layer = MagicMock()
+        mock_channel_layer.group_send = AsyncMock()
+        mock_get_channel_layer.return_value = mock_channel_layer
+
+        # 用 POST 把既有 write 協作者改成 read
+        response = client.post(
+            f"/api/documents/{document_id}/collaborators/",
+            data=json.dumps({"username": collab_user.username, "permission": "read"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {owner_access_token}"
+        )
+        assert response.status_code == 200  # 更新既有協作者回 200
+
+        mock_channel_layer.group_send.assert_called_once()
+        _, event = mock_channel_layer.group_send.call_args[0]
+        assert event["type"] == "permission_changed"
+        assert event["user_id"] == str(collab_user.id)
+        assert event["can_write"] is False
+
+
 def test_document_response_includes_permission_fields(authenticated_client, create_user):
     """測試文檔響應包含權限欄位"""
     client, owner_user, owner_access_token = authenticated_client

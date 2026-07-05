@@ -732,6 +732,50 @@ class DocConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.error(f"向用戶 {self.user.username} 發送文檔還原通知失敗: {str(e)}")
 
+    async def permission_changed(self, event):
+        """
+        處理來自房間組的權限變更消息（由協作者管理 API 在權限變更時發送）
+
+        WS 連線的權限是連線時快照（self.can_write），此 handler 讓權限變更
+        對既有連線即時生效。只對被變更的用戶自己的連線生效：
+        - removed=True：發送錯誤消息後以 PERMISSION_DENIED 關閉連線
+        - 升降權：更新 self.can_write 並通知 client 同步 UI
+
+        Args:
+            event: 包含 user_id、removed、can_write 的事件字典
+        """
+        if str(self.user.id) != event['user_id']:
+            return
+
+        if event.get('removed'):
+            logger.info(
+                f"用戶 {self.user.username} 已被移除文檔 {self.document_id} 的協作者資格，關閉其連線"
+            )
+            try:
+                await self.send(text_data=json.dumps({
+                    'type': 'connection_error',
+                    'error_code': 'PERMISSION_DENIED',
+                    'message': 'Your access to this document has been removed'
+                }))
+            except Exception as e:
+                logger.error(f"發送權限移除消息失敗: {str(e)}")
+            await self.close(code=WSCloseCodes.PERMISSION_DENIED)
+            return
+
+        new_can_write = event['can_write']
+        if self.can_write != new_can_write:
+            self.can_write = new_can_write
+            logger.info(
+                f"用戶 {self.user.username} 在文檔 {self.document_id} 的寫入權限更新為 {new_can_write}"
+            )
+            try:
+                await self.send(text_data=json.dumps({
+                    'type': 'permission_update',
+                    'can_write': new_can_write
+                }))
+            except Exception as e:
+                logger.error(f"發送權限更新消息失敗: {str(e)}")
+
     # ========== 游標與 Presence 功能 ==========
 
     async def handle_cursor_move(self, data):

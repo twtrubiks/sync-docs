@@ -294,6 +294,20 @@
 					currentUserId = data.user_id;
 					console.log(`WebSocket connected, can_write: ${canWrite}, user_id: ${currentUserId}`);
 					break;
+				case 'permission_update':
+					// 擁有者變更了自己的權限（升降權），即時生效
+					canWrite = data.can_write;
+					if (canWrite) {
+						toastSuccess('You now have edit access to this document.');
+					} else {
+						// 降權：清除未送出的編輯狀態，避免 pending 的 PUT / delta 被後端拒絕
+						clearTimeout(debounceTimeout);
+						clearTimeout(throttleTimeout);
+						pendingDelta = null;
+						saveStatus = 'idle';
+						toastWarning('Your access has been changed to read-only.');
+					}
+					break;
 				case 'doc_update':
 					if (data.delta && editor) {
 						editor.updateContents(data.delta, 'silent');

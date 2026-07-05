@@ -8,7 +8,7 @@ import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from django.contrib.auth.models import AnonymousUser
-from docs_app.consumers import DocConsumer, MAX_MESSAGE_SIZE, MAX_OPS_COUNT
+from docs_app.consumers import DocConsumer, MAX_MESSAGE_SIZE, MAX_OPS_COUNT, WSCloseCodes
 from docs_app.ai_service import ai_service
 from docs_app.ai_rate_limiter import ai_rate_limiter
 
@@ -58,6 +58,95 @@ class TestDocConsumer:
         """測試消費者初始化"""
         consumer = DocConsumer()
         assert consumer is not None
+
+
+class TestPermissionChangedHandler:
+    """測試 permission_changed 事件處理（協作者權限變更對既有連線即時生效）"""
+
+    @pytest.fixture
+    def mock_consumer(self, test_user, test_document):
+        """創建模擬的 consumer 實例"""
+        consumer = DocConsumer()
+        consumer.user = test_user
+        consumer.document_id = str(test_document.id)
+        consumer.room_group_name = f'doc_{test_document.id}'
+        consumer.channel_name = 'test_channel'
+        consumer.channel_layer = MagicMock()
+        consumer.channel_layer.group_send = AsyncMock()
+        consumer.send = AsyncMock()
+        consumer.close = AsyncMock()
+        consumer.can_write = True
+        return consumer
+
+    async def test_removed_sends_error_and_closes(self, mock_consumer, test_user):
+        """測試被移除協作者資格時收到錯誤消息並以 PERMISSION_DENIED 斷線"""
+        await mock_consumer.permission_changed({
+            'type': 'permission_changed',
+            'user_id': str(test_user.id),
+            'removed': True,
+            'can_write': False,
+        })
+
+        sent_data = json.loads(mock_consumer.send.call_args.kwargs['text_data'])
+        assert sent_data['type'] == 'connection_error'
+        assert sent_data['error_code'] == 'PERMISSION_DENIED'
+        mock_consumer.close.assert_called_once_with(code=WSCloseCodes.PERMISSION_DENIED)
+
+    async def test_demote_updates_can_write_and_notifies(self, mock_consumer, test_user):
+        """測試降權為只讀時 can_write 即時更新並通知 client"""
+        await mock_consumer.permission_changed({
+            'type': 'permission_changed',
+            'user_id': str(test_user.id),
+            'removed': False,
+            'can_write': False,
+        })
+
+        assert mock_consumer.can_write is False
+        sent_data = json.loads(mock_consumer.send.call_args.kwargs['text_data'])
+        assert sent_data['type'] == 'permission_update'
+        assert sent_data['can_write'] is False
+        mock_consumer.close.assert_not_called()
+
+    async def test_promote_updates_can_write_and_notifies(self, mock_consumer, test_user):
+        """測試只讀升權為編輯時 can_write 即時更新並通知 client"""
+        mock_consumer.can_write = False
+
+        await mock_consumer.permission_changed({
+            'type': 'permission_changed',
+            'user_id': str(test_user.id),
+            'removed': False,
+            'can_write': True,
+        })
+
+        assert mock_consumer.can_write is True
+        sent_data = json.loads(mock_consumer.send.call_args.kwargs['text_data'])
+        assert sent_data['type'] == 'permission_update'
+        assert sent_data['can_write'] is True
+
+    async def test_event_for_other_user_is_ignored(self, mock_consumer):
+        """測試其他用戶的權限變更事件不影響自己的連線"""
+        await mock_consumer.permission_changed({
+            'type': 'permission_changed',
+            'user_id': '99999',
+            'removed': True,
+            'can_write': False,
+        })
+
+        assert mock_consumer.can_write is True
+        mock_consumer.send.assert_not_called()
+        mock_consumer.close.assert_not_called()
+
+    async def test_same_permission_no_notification(self, mock_consumer, test_user):
+        """測試權限未實際變化時不發送通知"""
+        await mock_consumer.permission_changed({
+            'type': 'permission_changed',
+            'user_id': str(test_user.id),
+            'removed': False,
+            'can_write': True,  # 原本就是 True
+        })
+
+        assert mock_consumer.can_write is True
+        mock_consumer.send.assert_not_called()
 
 
 class TestDocConsumerValidation:
