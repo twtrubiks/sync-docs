@@ -147,6 +147,26 @@
 		}
 	}
 
+	async function handleUpdatePermission(collaborator: Collaborator, event: Event) {
+		const select = event.currentTarget as HTMLSelectElement;
+		const newPermission = select.value as 'read' | 'write';
+		if (newPermission === collaborator.permission) return;
+		try {
+			const updated = await put(`/documents/${documentId}/collaborators/${collaborator.id}/`, {
+				permission: newPermission
+			});
+			collaborators = collaborators.map((c) => (c.id === updated.id ? updated : c));
+			toastSuccess(
+				`${updated.username} can now ${updated.permission === 'write' ? 'edit' : 'only view'} this document.`
+			);
+		} catch (error) {
+			console.error('Failed to update permission:', error);
+			// 更新失敗：把下拉選單還原成原本的權限
+			select.value = collaborator.permission;
+			toastError('Failed to update permission.');
+		}
+	}
+
 	function openRemoveConfirm(collaborator: Collaborator) {
 		collaboratorToRemove = collaborator;
 		showRemoveConfirmModal = true;
@@ -948,9 +968,21 @@
 						<div class="collaborator-info">
 							<span class="collaborator-name">{collaborator.username}</span>
 							<span class="collaborator-email">{collaborator.email}</span>
-							<span class="permission-badge {collaborator.permission}">
-								{collaborator.permission === 'write' ? 'Can Edit' : 'View Only'}
-							</span>
+							{#if isOwner}
+								<select
+									value={collaborator.permission}
+									onchange={(e) => handleUpdatePermission(collaborator, e)}
+									class="permission-select compact"
+									aria-label="Change permission for {collaborator.username}"
+								>
+									<option value="write">Can Edit</option>
+									<option value="read">View Only</option>
+								</select>
+							{:else}
+								<span class="permission-badge {collaborator.permission}">
+									{collaborator.permission === 'write' ? 'Can Edit' : 'View Only'}
+								</span>
+							{/if}
 						</div>
 						{#if isOwner}
 							<button
@@ -1584,6 +1616,13 @@
 		outline: none;
 		border-color: var(--color-primary-500);
 		box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
+	}
+	/* 協作者列表內的行內下拉選單（相對表單版縮小） */
+	.permission-select.compact {
+		width: auto;
+		min-width: 0;
+		padding: 0.25rem 1.25rem 0.25rem 0.5rem;
+		font-size: 12px;
 	}
 
 	/* Permission badges in collaborator list */

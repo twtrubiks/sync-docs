@@ -87,8 +87,8 @@ vi.mock('$lib/components/CommentPanel.svelte', () => ({
 
 // Import after mocks
 import Page from './+page.svelte';
-import { get } from '$lib/auth';
-import { toastError } from '$lib/toast';
+import { get, put } from '$lib/auth';
+import { toastError, toastSuccess } from '$lib/toast';
 
 // Mock document data
 const mockDoc = {
@@ -99,36 +99,40 @@ const mockDoc = {
 	updated_at: '2026-03-07T12:00:00Z'
 };
 
+// 共用的瀏覽器環境 mock（WebSocket + localStorage）
+function setupBrowserMocks() {
+	// Mock WebSocket
+	// 注意：Vitest 4 起，被 `new` 呼叫的 mock 必須使用 function/class 實作，
+	// 箭頭函式會拋出 "is not a constructor"。
+	globalThis.WebSocket = vi.fn().mockImplementation(function () {
+		return {
+			close: vi.fn(),
+			send: vi.fn(),
+			readyState: 1,
+			onopen: null,
+			onclose: null,
+			onmessage: null,
+			onerror: null
+		};
+	}) as unknown as typeof WebSocket;
+
+	// Mock localStorage
+	const store: Record<string, string> = { access_token: 'mock-token' };
+	vi.stubGlobal('localStorage', {
+		getItem: vi.fn((key: string) => store[key] ?? null),
+		setItem: vi.fn((key: string, val: string) => {
+			store[key] = val;
+		}),
+		removeItem: vi.fn((key: string) => {
+			delete store[key];
+		})
+	});
+}
+
 describe('Document Page - Load States', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-
-		// Mock WebSocket
-		// 注意：Vitest 4 起，被 `new` 呼叫的 mock 必須使用 function/class 實作，
-		// 箭頭函式會拋出 "is not a constructor"。
-		globalThis.WebSocket = vi.fn().mockImplementation(function () {
-			return {
-				close: vi.fn(),
-				send: vi.fn(),
-				readyState: 1,
-				onopen: null,
-				onclose: null,
-				onmessage: null,
-				onerror: null
-			};
-		}) as unknown as typeof WebSocket;
-
-		// Mock localStorage
-		const store: Record<string, string> = { access_token: 'mock-token' };
-		vi.stubGlobal('localStorage', {
-			getItem: vi.fn((key: string) => store[key] ?? null),
-			setItem: vi.fn((key: string, val: string) => {
-				store[key] = val;
-			}),
-			removeItem: vi.fn((key: string) => {
-				delete store[key];
-			})
-		});
+		setupBrowserMocks();
 	});
 
 	it('should show loading state initially', () => {
@@ -237,5 +241,79 @@ describe('Document Page - Load States', () => {
 			// Falls back to default message
 			expect(screen.getByText('Failed to load document.')).toBeInTheDocument();
 		});
+	});
+});
+
+describe('Document Page - Collaborator Permission Update', () => {
+	const mockCollaborator = {
+		id: 2,
+		username: 'alice',
+		email: 'alice@example.com',
+		permission: 'write'
+	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		setupBrowserMocks();
+
+		// 文檔載入與協作者列表都走 get，依 URL 區分
+		vi.mocked(get).mockImplementation((url: string) => {
+			if (url.includes('/collaborators/')) {
+				return Promise.resolve([{ ...mockCollaborator }]);
+			}
+			return Promise.resolve(mockDoc);
+		});
+	});
+
+	async function openShareModalAndGetSelect(): Promise<HTMLSelectElement> {
+		render(Page);
+
+		// 等文檔載入完成後打開 Share modal
+		await waitFor(() => {
+			expect(screen.getByTitle('Share')).toBeInTheDocument();
+		});
+		await fireEvent.click(screen.getByTitle('Share'));
+
+		// 等協作者列表載入，取得該協作者的權限下拉選單
+		return (await screen.findByLabelText('Change permission for alice')) as HTMLSelectElement;
+	}
+
+	it('should update permission via PUT and reflect new value', async () => {
+		vi.mocked(put).mockResolvedValue({ ...mockCollaborator, permission: 'read' });
+
+		const select = await openShareModalAndGetSelect();
+		expect(select.value).toBe('write');
+
+		await fireEvent.change(select, { target: { value: 'read' } });
+
+		await waitFor(() => {
+			expect(put).toHaveBeenCalledWith('/documents/test-doc-123/collaborators/2/', {
+				permission: 'read'
+			});
+			expect(toastSuccess).toHaveBeenCalledWith('alice can now only view this document.');
+			expect(select.value).toBe('read');
+		});
+	});
+
+	it('should revert select value and show error toast when PUT fails', async () => {
+		vi.mocked(put).mockRejectedValue(new Error('Server error'));
+
+		const select = await openShareModalAndGetSelect();
+
+		await fireEvent.change(select, { target: { value: 'read' } });
+
+		await waitFor(() => {
+			expect(toastError).toHaveBeenCalledWith('Failed to update permission.');
+			// 失敗後下拉選單還原為原本的權限
+			expect(select.value).toBe('write');
+		});
+	});
+
+	it('should not call PUT when the selected permission is unchanged', async () => {
+		const select = await openShareModalAndGetSelect();
+
+		await fireEvent.change(select, { target: { value: 'write' } });
+
+		expect(put).not.toHaveBeenCalled();
 	});
 });
