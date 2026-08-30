@@ -73,6 +73,9 @@
 	let reconnectTimer: ReturnType<typeof setTimeout> | undefined = $state(undefined);
 	const MAX_RECONNECT_ATTEMPTS = 5;
 	const BASE_RECONNECT_DELAY = 1000; // 1s
+	// 後端拒絕連線 / 移除權限時會先送 connection_error（帶原因）再 close，
+	// 但 close frame 不帶 reason；先暫存訊息，onclose 時交給 handleWsError 顯示
+	let pendingCloseMessage: string | null = null;
 
 	// Permission state (from API and WebSocket)
 	let canWrite = $state(true);
@@ -309,6 +312,7 @@
 			socket.close();
 			socket = null;
 		}
+		pendingCloseMessage = null;
 
 		const token = localStorage.getItem('access_token');
 		if (!token) {
@@ -431,7 +435,8 @@
 					break;
 				}
 				case 'connection_error':
-					// 連接錯誤會在 onclose 之前收到，記錄到 console
+					// 後端隨後會 close；先暫存訊息，讓 onclose 顯示具體原因
+					pendingCloseMessage = data.message ?? null;
 					console.warn('WebSocket connection error:', data.error_code, data.message);
 					break;
 				case 'error':
@@ -474,20 +479,23 @@
 		socket.onclose = (event) => {
 			console.log('WebSocket closed:', event.code, event.reason);
 			socket = null;
+			// close frame 的 reason 為空時，改用先前 connection_error 帶來的訊息
+			const closeMessage = event.reason || pendingCloseMessage || undefined;
+			pendingCloseMessage = null;
 
 			// 正常關閉或離開頁面
 			if (event.code === 1000 || event.code === 1001) return;
 
 			// Token 過期：嘗試刷新後重連（由 handleWsError 內部處理）
 			if (event.code === WS_CLOSE_CODES.TOKEN_EXPIRED) {
-				handleWsError(event.code, event.reason);
+				handleWsError(event.code, closeMessage);
 				return;
 			}
 
 			// 永久性錯誤（後端主動關閉）
 			if (event.code >= 4001 && event.code <= 4008) {
 				saveStatus = 'error';
-				handleWsError(event.code, event.reason);
+				handleWsError(event.code, closeMessage);
 				return;
 			}
 

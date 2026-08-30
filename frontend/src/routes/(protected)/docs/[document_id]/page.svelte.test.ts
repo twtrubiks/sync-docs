@@ -89,6 +89,7 @@ vi.mock('$lib/components/CommentPanel.svelte', () => ({
 import Page from './+page.svelte';
 import { get, put } from '$lib/auth';
 import { toastError, toastSuccess } from '$lib/toast';
+import { goto } from '$app/navigation';
 
 // Mock document data
 const mockDoc = {
@@ -99,13 +100,26 @@ const mockDoc = {
 	updated_at: '2026-03-07T12:00:00Z'
 };
 
+interface MockWebSocket {
+	close: ReturnType<typeof vi.fn>;
+	send: ReturnType<typeof vi.fn>;
+	readyState: number;
+	onopen: ((event: unknown) => void) | null;
+	onclose: ((event: { code: number; reason: string }) => void) | null;
+	onmessage: ((event: { data: string }) => void) | null;
+	onerror: ((event: unknown) => void) | null;
+}
+
 // 共用的瀏覽器環境 mock（WebSocket + localStorage）
 function setupBrowserMocks() {
 	// Mock WebSocket
 	// 注意：Vitest 4 起，被 `new` 呼叫的 mock 必須使用 function/class 實作，
 	// 箭頭函式會拋出 "is not a constructor"。
-	globalThis.WebSocket = vi.fn().mockImplementation(function () {
-		return {
+	// `new` 呼叫時 vitest 回傳的是 `this` 實例而非 return 的物件，
+	// 因此屬性要掛在 this 上，頁面才會在同一個物件上設定 onmessage / onclose；
+	// 測試可透過 vi.mocked(WebSocket).mock.instances 取得該實例
+	globalThis.WebSocket = vi.fn().mockImplementation(function (this: MockWebSocket) {
+		Object.assign(this, {
 			close: vi.fn(),
 			send: vi.fn(),
 			readyState: 1,
@@ -113,7 +127,7 @@ function setupBrowserMocks() {
 			onclose: null,
 			onmessage: null,
 			onerror: null
-		};
+		});
 	}) as unknown as typeof WebSocket;
 
 	// Mock localStorage
@@ -343,5 +357,35 @@ describe('Document Page - Save', () => {
 
 		expect(put).toHaveBeenCalledTimes(1);
 		expect(put).toHaveBeenCalledWith('/documents/test-doc-123/', { title: 'Renamed' });
+	});
+});
+
+describe('Document Page - WebSocket close handling', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		setupBrowserMocks();
+	});
+
+	it('should surface the connection_error message when the backend closes without a reason', async () => {
+		// 後端先送 connection_error 再 close(code)，close frame 沒有 reason，
+		// 具體原因（如被移除協作資格）必須靠暫存的 connection_error 訊息顯示
+		vi.mocked(get).mockResolvedValue(mockDoc);
+		render(Page);
+
+		await waitFor(() => expect(globalThis.WebSocket).toHaveBeenCalled());
+		const ws = vi.mocked(globalThis.WebSocket).mock.instances[0] as unknown as MockWebSocket;
+		expect(ws.onmessage).toBeTypeOf('function');
+
+		ws.onmessage!({
+			data: JSON.stringify({
+				type: 'connection_error',
+				error_code: 'PERMISSION_DENIED',
+				message: 'Your access to this document has been removed'
+			})
+		});
+		ws.onclose!({ code: 4003, reason: '' });
+
+		expect(toastError).toHaveBeenCalledWith('Your access to this document has been removed');
+		expect(goto).toHaveBeenCalledWith('/dashboard');
 	});
 });
