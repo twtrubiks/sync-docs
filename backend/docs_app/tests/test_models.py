@@ -317,33 +317,3 @@ class TestDocumentModel:
     def test_can_user_write_non_collaborator(self, test_document, another_user):
         """測試非協作者不能編輯文檔"""
         assert test_document.can_user_write(another_user) is False
-
-    def test_get_user_permission_owner(self, test_document):
-        """測試獲取擁有者權限返回'owner'"""
-        permission = test_document.get_user_permission(test_document.owner)
-        assert permission == 'owner'
-
-    def test_get_user_permission_write_collaborator(self, test_document, another_user):
-        """測試獲取編輯協作者權限返回'write'"""
-        DocumentCollaborator.objects.create(
-            document=test_document,
-            user=another_user,
-            permission=PermissionLevel.WRITE
-        )
-        permission = test_document.get_user_permission(another_user)
-        assert permission == PermissionLevel.WRITE
-
-    def test_get_user_permission_read_collaborator(self, test_document, another_user):
-        """測試獲取只讀協作者權限返回'read'"""
-        DocumentCollaborator.objects.create(
-            document=test_document,
-            user=another_user,
-            permission=PermissionLevel.READ
-        )
-        permission = test_document.get_user_permission(another_user)
-        assert permission == PermissionLevel.READ
-
-    def test_get_user_permission_non_collaborator(self, test_document, another_user):
-        """測試獲取非協作者權限返回None"""
-        permission = test_document.get_user_permission(another_user)
-        assert permission is None

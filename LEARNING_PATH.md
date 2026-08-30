@@ -261,7 +261,7 @@ Document.objects.filter(owner=user)
 - 閱讀檔案：`frontend/src/routes/(protected)/docs/[document_id]/+page.svelte` 的 `connectWebSocket`、`scheduleReconnect`、`getReconnectDelay` 方法
 - 關鍵概念：
   - 指數退避 + 隨機抖動（Exponential Backoff + Jitter）避免伺服器雪崩
-  - 正常關閉（1000/1001）和永久性錯誤（4001-4008）不重連
+  - 正常關閉（1000/1001）和永久性錯誤（4000-4999 應用層代碼）不重連
   - 暫時性錯誤自動重連，最多 5 次
   - TOKEN_EXPIRED（4002）refresh 成功後的重連也走同一套退避與次數上限，
     避免 token 剛換發又立即被拒絕時無限緊迴圈狂打 refresh 端點（自我 DoS）

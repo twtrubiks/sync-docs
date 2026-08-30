@@ -19,10 +19,6 @@ class DocumentAdmin(admin.ModelAdmin):
     readonly_fields = ['id', 'created_at', 'updated_at']
     inlines = [DocumentCollaboratorInline]
 
-    def get_collaborators_count(self, obj):
-        return obj.collaborators.count()
-    get_collaborators_count.short_description = '協作者數量'
-
 
 @admin.register(DocumentCollaborator)
 class DocumentCollaboratorAdmin(admin.ModelAdmin):

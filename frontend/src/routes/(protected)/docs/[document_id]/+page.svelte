@@ -30,16 +30,14 @@
 		MessageCircleQuestion
 	} from '@lucide/svelte';
 
-	// WebSocket Close Codes（與後端對應）
+	// WebSocket Close Codes（與後端 WSCloseCodes 對應；訊息格式/大小/限流/只讀
+	// 屬執行期錯誤，後端以 {type: 'error'} 回報並保持連線，不會用 close code）
 	const WS_CLOSE_CODES = {
 		AUTH_FAILED: 4001,
 		TOKEN_EXPIRED: 4002,
 		PERMISSION_DENIED: 4003,
 		DOCUMENT_NOT_FOUND: 4004,
-		TOO_MANY_CONNECTIONS: 4005,
-		INVALID_MESSAGE: 4006,
-		MESSAGE_TOO_LARGE: 4007,
-		RATE_LIMITED: 4008
+		TOO_MANY_CONNECTIONS: 4005
 	} as const;
 
 	// Svelte 5: $page store auto-subscription still works
@@ -261,9 +259,6 @@
 				break;
 			case WS_CLOSE_CODES.TOO_MANY_CONNECTIONS:
 				toastError('Too many open tabs. Please close some and refresh.');
-				break;
-			case WS_CLOSE_CODES.RATE_LIMITED:
-				toastWarning('Sending too fast. Please slow down.');
 				break;
 			default:
 				toastError(message || 'Connection lost. Please refresh the page.');
@@ -492,8 +487,8 @@
 				return;
 			}
 
-			// 永久性錯誤（後端主動關閉）
-			if (event.code >= 4001 && event.code <= 4008) {
+			// 永久性錯誤（4000–4999 為後端定義的應用層代碼，皆為主動拒絕/關閉）
+			if (event.code >= 4000 && event.code <= 4999) {
 				saveStatus = 'error';
 				handleWsError(event.code, closeMessage);
 				return;

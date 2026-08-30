@@ -76,10 +76,8 @@ class WSCloseCodes:
     PERMISSION_DENIED = 4003     # 權限不足
     DOCUMENT_NOT_FOUND = 4004    # 文檔不存在
     TOO_MANY_CONNECTIONS = 4005  # 連接數超限
-    INVALID_MESSAGE = 4006       # 無效消息格式
-    MESSAGE_TOO_LARGE = 4007     # 消息過大
-    RATE_LIMITED = 4008          # 頻率限制
-    READ_ONLY_VIOLATION = 4009   # 只讀用戶嘗試寫入
+    # 訊息格式 / 大小 / 頻率 / 只讀違規屬執行期錯誤：
+    # 以 {'type': 'error'} 回報並保持連線（見 _send_error），不使用 close code
 
 
 # 錯誤類型到關閉代碼的映射
@@ -105,7 +103,6 @@ class PermissionErrorType:
     NOT_AUTHENTICATED = 'NOT_AUTHENTICATED'
     DOCUMENT_NOT_FOUND = 'DOCUMENT_NOT_FOUND'
     PERMISSION_DENIED = 'PERMISSION_DENIED'
-    READ_ONLY = 'READ_ONLY'  # 只讀權限
 
 class DocConsumer(AsyncWebsocketConsumer):
     """

@@ -47,21 +47,6 @@ class ConnectionManager:
         """生成用戶連接追蹤的 Redis key"""
         return f"ws:connections:user:{user_id}"
 
-    async def can_connect(self, user_id: int) -> bool:
-        """
-        檢查用戶是否可以建立新連接
-
-        Args:
-            user_id: 用戶 ID
-
-        Returns:
-            bool: True 表示可以連接，False 表示已達上限
-        """
-        r = await self.get_redis()
-        key = self._get_key(user_id)
-        count = await r.hlen(key)
-        return count < self.max_connections
-
     async def add_connection(self, user_id: int, channel_name: str) -> bool:
         """
         嘗試添加連接
@@ -176,21 +161,6 @@ class ConnectionManager:
         except Exception as e:
             logger.error(f"獲取連接數時發生錯誤: {str(e)}")
             return 0
-
-    async def clear_user_connections(self, user_id: int):
-        """
-        清除用戶的所有連接記錄（用於測試或管理）
-
-        Args:
-            user_id: 用戶 ID
-        """
-        try:
-            r = await self.get_redis()
-            key = self._get_key(user_id)
-            await r.delete(key)
-            logger.info(f"已清除用戶 {user_id} 的所有連接記錄")
-        except Exception as e:
-            logger.error(f"清除連接記錄時發生錯誤: {str(e)}")
 
     async def refresh_connection(self, user_id: int, channel_name: str):
         """

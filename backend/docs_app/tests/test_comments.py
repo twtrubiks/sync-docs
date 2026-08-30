@@ -98,32 +98,6 @@ class TestCommentModel:
         )
         assert comment.author_username == test_user.username
 
-    def test_reply_count_property(self, test_user, test_document):
-        """測試 reply_count 屬性"""
-        parent = Comment.objects.create(
-            document=test_document,
-            author=test_user,
-            content="Parent"
-        )
-        assert parent.reply_count == 0
-
-        Comment.objects.create(
-            document=test_document,
-            author=test_user,
-            content="Reply 1",
-            parent=parent
-        )
-        Comment.objects.create(
-            document=test_document,
-            author=test_user,
-            content="Reply 2",
-            parent=parent
-        )
-
-        # 刷新 parent 以獲取最新的 reply_count
-        parent.refresh_from_db()
-        assert parent.reply_count == 2
-
     def test_with_reply_count_queryset(self, test_user, test_document):
         """測試 with_reply_count() 自定義 QuerySet 方法"""
         parent1 = Comment.objects.create(

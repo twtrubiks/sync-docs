@@ -982,8 +982,9 @@ cursor.execute(f"SELECT * FROM document WHERE owner={user.id}")  # 危險！
 
 **認證失敗處理：**
 - ✅ 連接失敗時發送具體錯誤原因（type: connection_error）
-- ✅ 使用 WebSocket Close Codes (4001-4009)
-- ✅ 支持多種錯誤類型：TOKEN_EXPIRED、PERMISSION_DENIED、DOCUMENT_NOT_FOUND、READ_ONLY_VIOLATION 等
+- ✅ 使用 WebSocket Close Codes (4001-4005)
+- ✅ 支持多種錯誤類型：TOKEN_EXPIRED、PERMISSION_DENIED、DOCUMENT_NOT_FOUND、TOO_MANY_CONNECTIONS 等；
+  訊息格式 / 大小 / 限流 / 只讀違規屬執行期錯誤，以 `{type: 'error'}` 回報並保持連線
 - ✅ TOKEN_EXPIRED 時自動用 Refresh Token 換取新 Access Token 後重連，而非直接登出
 
 **前端自動重連機制：**
@@ -993,7 +994,7 @@ cursor.execute(f"SELECT * FROM document WHERE owner={user.id}")  # 危險！
   避免 token 剛換發又立即被 4002 拒絕（如 clock skew）時無限緊迴圈狂打 refresh 端點
 - ✅ 退避計數器在收到 `connection_success` 時才歸零：後端拒絕連線時會先 accept
   （為了送錯誤消息）再 close，若在 onopen 歸零，被拒絕的連線也會重置退避
-- ✅ 其他永久性錯誤（4001-4009）和正常關閉（1000/1001）不觸發重連
+- ✅ 其他永久性錯誤（4000-4999 應用層代碼）和正常關閉（1000/1001）不觸發重連
 - ✅ 重連前清理舊 socket 防止連線洩漏
 - ✅ 重連成功顯示 Connection restored 提示
 

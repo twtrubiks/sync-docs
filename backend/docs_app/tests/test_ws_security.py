@@ -528,9 +528,6 @@ class TestWSCloseCodes:
             WSCloseCodes.PERMISSION_DENIED,
             WSCloseCodes.DOCUMENT_NOT_FOUND,
             WSCloseCodes.TOO_MANY_CONNECTIONS,
-            WSCloseCodes.INVALID_MESSAGE,
-            WSCloseCodes.MESSAGE_TOO_LARGE,
-            WSCloseCodes.RATE_LIMITED,
         ]
 
         for code in codes:
@@ -544,9 +541,6 @@ class TestWSCloseCodes:
             WSCloseCodes.PERMISSION_DENIED,
             WSCloseCodes.DOCUMENT_NOT_FOUND,
             WSCloseCodes.TOO_MANY_CONNECTIONS,
-            WSCloseCodes.INVALID_MESSAGE,
-            WSCloseCodes.MESSAGE_TOO_LARGE,
-            WSCloseCodes.RATE_LIMITED,
         ]
 
         assert len(codes) == len(set(codes)), "Close codes are not unique"

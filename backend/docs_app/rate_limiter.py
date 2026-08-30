@@ -138,46 +138,6 @@ class RateLimiter:
                 'retry_after': 0
             }
 
-    async def get_current_count(self, user_id: int, document_id: str) -> int:
-        """
-        獲取當前窗口內的消息數量
-
-        Args:
-            user_id: 用戶 ID
-            document_id: 文檔 ID
-
-        Returns:
-            int: 當前窗口內的消息數量
-        """
-        try:
-            r = await self.get_redis()
-            key = self._get_key(user_id, document_id)
-            now_ms = int(time.time() * 1000)
-            window_start_ms = now_ms - (self.window_seconds * 1000)
-
-            # 先清理過期的
-            await r.zremrangebyscore(key, '-inf', window_start_ms)
-            return await r.zcard(key)
-        except Exception as e:
-            logger.error(f"獲取消息計數時發生錯誤: {str(e)}")
-            return 0
-
-    async def reset(self, user_id: int, document_id: str):
-        """
-        重置用戶在特定文檔的速率限制（用於測試或管理）
-
-        Args:
-            user_id: 用戶 ID
-            document_id: 文檔 ID
-        """
-        try:
-            r = await self.get_redis()
-            key = self._get_key(user_id, document_id)
-            await r.delete(key)
-            logger.info(f"已重置用戶 {user_id} 在文檔 {document_id} 的速率限制")
-        except Exception as e:
-            logger.error(f"重置速率限制時發生錯誤: {str(e)}")
-
 
 # 全局實例
 rate_limiter = RateLimiter()

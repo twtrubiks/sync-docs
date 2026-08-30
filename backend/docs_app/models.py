@@ -82,8 +82,9 @@ class Document(models.Model):
         return f"{self.title} (by {self.owner.username})"
 
     def get_collaborators_count(self):
-        """獲取協作者數量"""
+        """獲取協作者數量（同時供 admin list_display 使用）"""
         return self.collaborators.count()
+    get_collaborators_count.short_description = '協作者數量'
 
     def is_shared_with_user(self, user):
         """檢查文檔是否與指定用戶共享"""
@@ -101,20 +102,6 @@ class Document(models.Model):
             user=user,
             permission=PermissionLevel.WRITE
         ).exists()
-
-    def get_user_permission(self, user):
-        """
-        獲取用戶對此文檔的權限級別
-
-        Returns:
-            str: 'owner' | 'read' | 'write' | None
-        """
-        if self.owner == user:
-            return 'owner'
-        collab = self.collaborators.filter(user=user).first()
-        if collab:
-            return collab.permission
-        return None
 
 
 class DocumentCollaborator(models.Model):
@@ -385,8 +372,3 @@ class Comment(models.Model):
     def author_username(self) -> str:
         """返回作者用戶名，用於 Schema 序列化"""
         return self.author.username
-
-    @property
-    def reply_count(self) -> int:
-        """返回回覆數量"""
-        return self.replies.count()

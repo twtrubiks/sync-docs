@@ -176,25 +176,11 @@ class WebSocketMessageSchema(Schema):
 
 # ============ 游標與在線狀態 Schema ============
 
-class CursorPosition(Schema):
-    """游標位置"""
-    index: int        # Quill 游標位置（字符索引）
-    length: int = 0   # 選取長度（0 = 只有游標）
-
-
 class CursorMoveMessage(Schema):
     """WebSocket cursor_move 消息驗證"""
     type: str = "cursor_move"
     index: int
     length: int = 0
-
-
-class PresenceUser(Schema):
-    """在線用戶資訊"""
-    user_id: str
-    username: str
-    color: str
-    cursor: Optional[CursorPosition] = None
 
 
 # ============ 版本歷史 Schema ============

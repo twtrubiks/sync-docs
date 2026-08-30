@@ -5,13 +5,9 @@
 避免各自建立獨立的連線池，浪費資源。
 """
 
-import logging
-
 import redis.asyncio as aioredis
 import redis as sync_redis
 from django.conf import settings
-
-logger = logging.getLogger('docs_app')
 
 _async_redis = None
 _sync_redis = None
@@ -48,21 +44,3 @@ def get_sync_redis() -> sync_redis.Redis:
             decode_responses=True
         )
     return _sync_redis
-
-
-async def close_async_redis():
-    """關閉 async Redis 連線（用於 shutdown 清理）"""
-    global _async_redis
-    if _async_redis is not None:
-        await _async_redis.aclose()
-        _async_redis = None
-        logger.info("Async Redis 連線已關閉")
-
-
-def close_sync_redis():
-    """關閉 sync Redis 連線（用於 shutdown 清理）"""
-    global _sync_redis
-    if _sync_redis is not None:
-        _sync_redis.close()
-        _sync_redis = None
-        logger.info("Sync Redis 連線已關閉")
