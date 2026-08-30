@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 
@@ -315,5 +315,33 @@ describe('Document Page - Collaborator Permission Update', () => {
 		await fireEvent.change(select, { target: { value: 'write' } });
 
 		expect(put).not.toHaveBeenCalled();
+	});
+});
+
+describe('Document Page - Save', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		setupBrowserMocks();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('should PUT only the title when content was not edited locally', async () => {
+		// 遠端 delta 以 silent 套用不會更新綁定的 content；若單改標題也送 content，
+		// 會把過期快照寫回 DB 蓋掉協作者的內容
+		vi.mocked(get).mockResolvedValue(mockDoc);
+		vi.mocked(put).mockResolvedValue({});
+
+		render(Page);
+		const titleInput = await screen.findByPlaceholderText('Untitled Document');
+
+		vi.useFakeTimers();
+		await fireEvent.input(titleInput, { target: { value: 'Renamed' } });
+		await vi.advanceTimersByTimeAsync(1500);
+
+		expect(put).toHaveBeenCalledTimes(1);
+		expect(put).toHaveBeenCalledWith('/documents/test-doc-123/', { title: 'Renamed' });
 	});
 });

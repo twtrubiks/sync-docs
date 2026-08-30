@@ -65,6 +65,8 @@
 	let throttleTimeout: ReturnType<typeof setTimeout> | undefined = $state(undefined);
 	let lastSendTime = $state(0);
 	const THROTTLE_INTERVAL = 150; // ms（100-200ms 範圍）
+	// 本地是否改過內容且尚未落庫；只改標題時不送 content（見 debouncedSave）
+	let contentDirty = $state(false);
 
 	// Reconnect state
 	let reconnectAttempts = $state(0);
@@ -350,6 +352,7 @@
 						clearTimeout(debounceTimeout);
 						clearTimeout(throttleTimeout);
 						pendingDelta = null;
+						contentDirty = false;
 						saveStatus = 'idle';
 						toastWarning('Your access has been changed to read-only.');
 					}
@@ -376,6 +379,7 @@
 					clearTimeout(debounceTimeout);
 					clearTimeout(throttleTimeout);
 					pendingDelta = null;
+					contentDirty = false;
 					if (data.content) {
 						content = data.content;
 						if (editor) {
@@ -532,12 +536,22 @@
 		saveStatus = 'unsaved';
 		debounceTimeout = setTimeout(async () => {
 			saveStatus = 'saving';
+			// 內容持久化靠這裡的全量 PUT（WebSocket delta 不落庫）。
+			// 遠端 delta 以 'silent' 套用不會觸發 text-change，綁定的 `content`
+			// 不會吸收它們；所以只有本地真的改過內容才送 content，且直接取
+			// 編輯器當下內容，否則單改標題會把過期快照寫回 DB，蓋掉協作者剛存的內容
+			const payload: Record<string, unknown> = { title };
+			const sendingContent = contentDirty && editor !== undefined;
+			if (sendingContent) {
+				payload.content = editor!.getContents();
+				contentDirty = false;
+			}
 			try {
-				// The content is sent via WebSocket, here we just save the title.
-				// The backend consumer will save the latest content.
-				await put(`/documents/${documentId}/`, { title, content });
+				await put(`/documents/${documentId}/`, payload);
 				// The backend will broadcast 'doc_saved', which updates the status.
 			} catch (error) {
+				// 失敗則保留 dirty，下次儲存重送內容
+				if (sendingContent) contentDirty = true;
 				console.error('Failed to save document:', error);
 				saveStatus = 'error';
 				toastError('Failed to save document.');
@@ -577,6 +591,7 @@
 	function handleContentChange(detail: { delta: QuillDelta; source: string }) {
 		const { delta, source } = detail;
 		if (source !== 'user') return;
+		contentDirty = true;
 
 		// Accumulate delta using Quill Delta's compose method
 		if (pendingDelta) {
