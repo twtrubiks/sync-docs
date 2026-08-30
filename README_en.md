@@ -1,7 +1,7 @@
 # SyncDocs - Real-time Collaborative Document Editor
 
 [![Python](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/)
-[![Django](https://img.shields.io/badge/Django-6.0-green.svg)](https://www.djangoproject.com/)
+[![Django](https://img.shields.io/badge/Django-6.1-green.svg)](https://www.djangoproject.com/)
 [![SvelteKit](https://img.shields.io/badge/SvelteKit-2.x-orange.svg)](https://kit.svelte.dev/)
 [![Svelte](https://img.shields.io/badge/Svelte-5.x-red.svg)](https://svelte.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.x-blue.svg)](https://www.typescriptlang.org/)
@@ -63,7 +63,7 @@ Comment System
 ## ✨ Key Features
 
   * **Real-time Collaboration**: Multiple users can edit the same document simultaneously, with changes reflected instantly for all participants, powered by Django Channels.
-  * **Cursor Position Display**: Real-time display of collaborators' cursor positions and selections, using the quill-cursors package.
+  * **Cursor Position Display**: Real-time display of collaborators' cursor positions and selections, using the quill-cursors package (selections are painted with the CSS Custom Highlight API and require Chrome/Edge 122+, Safari 17.2+, or Firefox 140+; older browsers still show carets and name flags).
   * **Presence Indicators**: Show which users are currently viewing or editing the document, including usernames and colors.
   * **Rich Text Editing**: A clean and intuitive editor based on [Core Architecture of the Quill.js Delta Format](Delta_en.md), supporting various formatting options.
   * **AI Writing Assistant**: Integrates LLMs via Pydantic AI (switchable provider: NVIDIA NIM or Google Gemini), providing text summarization, polishing, structured proofreading, document analysis, and document Q&A features to enhance writing efficiency. Summarization, polishing, and document Q&A are **streamed over WebSocket**, rendering token-by-token (typewriter effect) and can be stopped at any time.

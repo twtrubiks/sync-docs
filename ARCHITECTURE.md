@@ -119,10 +119,10 @@ SyncDocs 是一個**教學型**的即時協作文件編輯器，展示了現代�
 | | Tailwind CSS | 4.x | 樣式框架 |
 | | @lucide/svelte | 1.x | 圖標庫 |
 | **後端** | Python | 3.13 | 程式語言 |
-| | Django | 6.0 | Web 框架 |
+| | Django | 6.1 | Web 框架 |
 | | Django Ninja | 1.6 | API 框架 |
 | | Django Channels | 4.x | WebSocket |
-| | Pydantic AI | 2.0 | AI 框架（供應商可切換 NVIDIA NIM / Gemini） |
+| | Pydantic AI | 2.x | AI 框架（供應商可切換 NVIDIA NIM / Gemini） |
 | **數據** | PostgreSQL | 18 | 主資料庫 |
 | | Redis | 8-alpine | 快取 & Channel Layer |
 | **部署** | Docker | latest | 容器化 |

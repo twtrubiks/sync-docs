@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from django.conf import settings
-from httpx import AsyncClient
+from httpx2 import AsyncClient
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models import Model
@@ -93,7 +93,7 @@ def _get_api_key() -> str:
 def _build_gemini_model() -> Model:
     """建立 Gemini（Google 原生 SDK）模型。
 
-    - timeout 須透過自訂 httpx client 設定（ModelSettings.timeout 對 Google 不生效）。
+    - timeout 須透過自訂 httpx2 client 設定（ModelSettings.timeout 對 Google 不生效；pydantic-ai 2.33+ 的 Google provider 要求 httpx2）。
     - thinking_budget=0 關閉思考：思考 token 會算進 max_tokens 預算，不關可能把回覆截斷。
     """
     return GoogleModel(

@@ -1,7 +1,7 @@
 # SyncDocs - 即時協作文件編輯器
 
 [![Python](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/)
-[![Django](https://img.shields.io/badge/Django-6.0-green.svg)](https://www.djangoproject.com/)
+[![Django](https://img.shields.io/badge/Django-6.1-green.svg)](https://www.djangoproject.com/)
 [![SvelteKit](https://img.shields.io/badge/SvelteKit-2.x-orange.svg)](https://kit.svelte.dev/)
 [![Svelte](https://img.shields.io/badge/Svelte-5.x-red.svg)](https://svelte.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.x-blue.svg)](https://www.typescriptlang.org/)
@@ -63,7 +63,7 @@ SyncDocs 是一款受 Google Docs 啟發、基於現代技術堆疊打造的網�
 ## ✨ 主要功能
 
 * **即時協作**：多位使用者可同時編輯同一份文件，變更會即時反映給所有參與者，由 Django Channels 提供支援。
-* **游標位置顯示**：即時顯示協作者的游標位置和選取範圍，使用 quill-cursors 套件實現。
+* **游標位置顯示**：即時顯示協作者的游標位置和選取範圍，使用 quill-cursors 套件實現（選取範圍以 CSS Custom Highlight API 繪製，需 Chrome/Edge 122+、Safari 17.2+、Firefox 140+；舊瀏覽器仍會顯示游標與名牌）。
 * **在線狀態指示**：顯示目前正在查看或編輯文件的使用者，包含用戶名稱和代表色。
 * **豐富文本編輯**：基於 [Quill.js Delta 的核心技術結構](Delta.md) 的簡潔直觀編輯器，支援多種格式選項。
 * **AI 寫作助手**：以 Pydantic AI 整合 LLM（供應商可切換：NVIDIA NIM 或 Google Gemini），提供文字摘要、潤稿、結構化校對、文件分析與文件問答功能，幫助使用者提升寫作效率。其中摘要、潤稿與文件問答採 **WebSocket 串流**，逐字即時輸出（打字機效果），可隨時停止生成。

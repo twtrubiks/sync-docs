@@ -289,7 +289,7 @@ Document.objects.filter(owner=user)
   - Field 級 TTL 機制（HEXPIRE）：心跳只續命自己的 field，活躍用戶不會消失，異常斷線殘留的 ghost user 會獨立過期
   - 連接數追蹤（`ws:connections:user:{user_id}`）採同一機制：TTL 掛在各自的 channel field 上，
     ghost 連線獨立過期，不會累積撞 max_connections 誤鎖用戶
-  - quill-cursors 套件整合（CSS 定位要點）
+  - quill-cursors 套件整合（v5 起選取範圍改用 CSS Custom Highlight API 繪製，淡化由 `--ql-cursor-selection-fade` 變數控制）
   - Svelte 5 Map 響應式注意事項（需創建新 Map 觸發更新）
 
 ### 階段檢查點

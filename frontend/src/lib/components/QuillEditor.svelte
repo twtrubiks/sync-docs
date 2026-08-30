@@ -29,8 +29,7 @@
 		if (!browser) return;
 
 		let textChangeHandler:
-			| ((delta: QuillDelta, oldDelta: QuillDelta, source: string) => void)
-			| undefined;
+			((delta: QuillDelta, oldDelta: QuillDelta, source: string) => void) | undefined;
 		let selectionChangeHandler:
 			| ((
 					range: { index: number; length: number } | null,
@@ -160,7 +159,10 @@
 		border-bottom-left-radius: 0.5rem;
 		border-bottom-right-radius: 0.5rem;
 		font-size: 16px;
-		position: relative; /* 必須：讓 quill-cursors 的絕對定位正確工作 */
+		position: relative; /* 必須：讓 quill-cursors 的 caret / 名牌絕對定位正確工作 */
+		/* 協作者選取範圍的淡化程度；quill-cursors 5 起文字選取改用 CSS Custom Highlight API 繪製，
+		   文字 highlight 與 embed 覆蓋層都讀這個變數 */
+		--ql-cursor-selection-fade: 0.3;
 	}
 	.quill-container :global(.ql-editor) {
 		min-height: 750px; /* A4-like height */
@@ -205,9 +207,5 @@
 		visibility: visible !important;
 		opacity: 1 !important;
 		transition: none !important;
-	}
-	.quill-container :global(.ql-cursor-selection-block) {
-		position: absolute;
-		opacity: 0.3;
 	}
 </style>

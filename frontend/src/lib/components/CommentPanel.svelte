@@ -379,8 +379,7 @@
 					class="border-primary-300 focus:border-primary-500 focus:ring-primary-500/20 w-full resize-none rounded-lg border p-3 text-sm transition-all duration-150 focus:ring-2 focus:outline-none"
 					rows="3"
 					placeholder="輸入評論..."
-					bind:value={newCommentContent}
-				></textarea>
+					bind:value={newCommentContent}></textarea>
 				<button
 					type="button"
 					class="bg-primary-600 hover:bg-primary-700 mt-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white
@@ -430,8 +429,7 @@
 								<textarea
 									class="border-primary-300 focus:border-primary-500 focus:ring-primary-500/20 mt-2 w-full resize-none rounded-lg border p-2 text-sm transition-all duration-150 focus:ring-2 focus:outline-none"
 									rows="2"
-									bind:value={editContent}
-								></textarea>
+									bind:value={editContent}></textarea>
 								<div class="mt-2 flex gap-2">
 									<button
 										type="button"
@@ -494,8 +492,7 @@
 											class="border-primary-300 focus:border-primary-500 focus:ring-primary-500/20 w-full resize-none rounded-lg border p-2 text-sm transition-all duration-150 focus:ring-2 focus:outline-none"
 											rows="2"
 											placeholder="輸入回覆..."
-											bind:value={replyContent}
-										></textarea>
+											bind:value={replyContent}></textarea>
 										<div class="mt-2 flex gap-2">
 											<button
 												type="button"
