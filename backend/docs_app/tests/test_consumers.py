@@ -349,7 +349,7 @@ class TestDocConsumerAIStream:
 
     @pytest.fixture
     def mock_consumer(self, test_user, test_document):
-        """創建模擬的 consumer 實例（AI 串流不要求寫入權限，與 HTTP /ai/process 一致）"""
+        """創建模擬的 consumer 實例（AI 串流不要求寫入權限，與 HTTP AI 端點一致）"""
         consumer = DocConsumer()
         consumer.user = test_user
         consumer.document_id = str(test_document.id)

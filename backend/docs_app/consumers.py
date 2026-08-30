@@ -33,7 +33,7 @@ MAX_OPS_COUNT = getattr(settings, 'WEBSOCKET_MAX_OPS_COUNT', 1000)
 # 心跳間隔（秒）- 用於刷新連接 TTL
 HEARTBEAT_INTERVAL = getattr(settings, 'WEBSOCKET_HEARTBEAT_INTERVAL', 120)  # 2 分鐘
 
-# AI 串流速率限制（與 HTTP /ai/process 共用同一 Redis 額度鍵 ai:{user_id}，每次串流算一次）
+# AI 串流速率限制（與 HTTP AI 端點共用同一 Redis 額度鍵 ai:{user_id}，每次串流算一次）
 AI_STREAM_RATE_LIMIT_REQUESTS = 10
 AI_STREAM_RATE_LIMIT_WINDOW = 60
 
@@ -439,7 +439,7 @@ class DocConsumer(AsyncWebsocketConsumer):
             return
 
         # AI 串流消息：摘要/潤稿/文件問答逐字回傳（只回發送者本人，不經 delta 驗證；
-        # 與 HTTP /ai/process 一致，僅需認證、不要求寫入權限）
+        # 與 HTTP AI 端點一致，僅需認證、不要求寫入權限）
         if msg_type == 'ai_stream':
             await self.handle_ai_stream(text_data_json)
             return
@@ -550,7 +550,7 @@ class DocConsumer(AsyncWebsocketConsumer):
         return False
 
     async def _reject_if_ai_rate_limited(self) -> bool:
-        """檢查 AI 串流速率限制（與 HTTP /ai/process 共用額度）；超限則回報錯誤並回傳 True。
+        """檢查 AI 串流速率限制（與 HTTP AI 端點共用額度）；超限則回報錯誤並回傳 True。
 
         同步限流器以 sync_to_async 包裝，避免阻塞事件迴圈。
         """
@@ -570,7 +570,7 @@ class DocConsumer(AsyncWebsocketConsumer):
         處理 AI 摘要/潤稿串流請求：驗證 → 速率限制 → 啟動可取消的背景串流任務。
 
         chunk 只回傳給發送者本人（self.send），不經 group_send，
-        複用既有連線的認證；速率限制與 HTTP /ai/process 共用同一額度。
+        複用既有連線的認證；速率限制與 HTTP AI 端點共用同一額度。
         """
         username = getattr(self.user, 'username', 'Unknown')
 

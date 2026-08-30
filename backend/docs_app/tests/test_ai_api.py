@@ -8,15 +8,8 @@ AIService 行為測試以 TestModel / FunctionModel override agent，全程不�
 import pytest
 from unittest.mock import patch, MagicMock
 from django.test import override_settings
-from pydantic import ValidationError
-from pydantic_ai.messages import (
-    ModelResponse,
-    TextPart,
-    ToolCallPart,
-    ToolReturnPart,
-    UserPromptPart,
-)
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.messages import ToolReturnPart, UserPromptPart
+from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from docs_app import ai_service as ai_service_module
@@ -29,13 +22,7 @@ from docs_app.ai_service import (
     _get_proofread_agent,
 )
 from docs_app.ai_rate_limiter import AIRateLimiter
-from docs_app.schemas import (
-    AIProcessRequest,
-    AIProcessResponse,
-    DocumentMetadata,
-    ProofreadResult,
-    WritingIssue,
-)
+from docs_app.schemas import DocumentMetadata, ProofreadResult, WritingIssue
 
 # 使用 pytest-django 的 db fixture 來確保資料庫在測試之間是乾淨的
 pytestmark = pytest.mark.django_db
@@ -59,57 +46,6 @@ def _reset_ai_globals():
 
 class TestAIService:
     """AI Service 單元測試（以 TestModel / FunctionModel override agent，全程不打 API）"""
-
-    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
-    async def test_process_summarize(self):
-        """測試摘要功能"""
-        with _get_agent().override(model=TestModel(custom_output_text="這是摘要結果")):
-            result = await AIService().process('summarize', '測試文字')
-            assert result == "這是摘要結果"
-
-    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
-    async def test_process_polish(self):
-        """測試潤稿功能"""
-        with _get_agent().override(model=TestModel(custom_output_text="潤飾後的文字")):
-            result = await AIService().process('polish', '原始文字')
-            assert result == "潤飾後的文字"
-
-    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
-    async def test_empty_text_error(self):
-        """測試空文字錯誤"""
-        with pytest.raises(ValueError, match="Text cannot be empty"):
-            await AIService().process('summarize', '')
-
-    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
-    async def test_invalid_action_error(self):
-        """測試無效操作錯誤"""
-        with pytest.raises(ValueError, match="Unknown action"):
-            await AIService().process('invalid', '文字')
-
-    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='')
-    async def test_api_not_configured_error(self):
-        """測試 API Key 未配置錯誤"""
-        with pytest.raises(RuntimeError, match="AI 服務未配置"):
-            await AIService().process('summarize', '文字')
-
-    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
-    async def test_text_truncation(self):
-        """測試文字長度限制（超過 5000 字元會被截斷後才送進 agent）"""
-        captured = {}
-
-        async def capture_fn(messages, info):
-            for message in messages:
-                for part in message.parts:
-                    if isinstance(part, UserPromptPart):
-                        captured['prompt'] = str(part.content)
-            return ModelResponse(parts=[TextPart('結果')])
-
-        long_text = 'A' * 6000
-        with _get_agent().override(model=FunctionModel(capture_fn)):
-            await AIService().process('summarize', long_text)
-
-        # 送進 agent 的 prompt 應含截斷省略號
-        assert '...' in captured['prompt']
 
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
     async def test_process_stream_yields_chunks(self):
@@ -139,6 +75,26 @@ class TestAIService:
         with pytest.raises(RuntimeError, match="AI 服務未配置"):
             async for _ in AIService().process_stream('summarize', '文字'):
                 pass
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_process_stream_text_truncation(self):
+        """串流：超過 5000 字元的輸入會被截斷後才送進 agent"""
+        captured = {}
+
+        async def capture_stream(messages, info):
+            for message in messages:
+                for part in message.parts:
+                    if isinstance(part, UserPromptPart):
+                        captured['prompt'] = str(part.content)
+            yield '結果'
+
+        long_text = 'A' * 6000
+        with _get_agent().override(model=FunctionModel(stream_function=capture_stream)):
+            async for _ in AIService().process_stream('summarize', long_text):
+                pass
+
+        # 送進 agent 的 prompt 應含截斷省略號
+        assert '...' in captured['prompt']
 
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='nv-key')
     def test_nvidia_builds_openai_model(self):
@@ -256,52 +212,6 @@ class TestDocQA:
     """文件問答測試（deps_type=DocDeps + @agent.tool，以 TestModel/FunctionModel override，不打 API）"""
 
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
-    async def test_ask_returns_answer(self):
-        """end-to-end 跑通 deps + 工具，回傳字串答案；agent 對外曝露 get_document_text 工具"""
-        model = TestModel()
-        with _get_doc_agent().override(model=model):
-            answer = await AIService().ask('這份文件在說什麼？', '介紹 Docker 的文件')
-
-        assert isinstance(answer, str)
-        tool_names = [t.name for t in model.last_model_request_parameters.function_tools]
-        assert tool_names == ['get_document_text']
-
-    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
-    async def test_tool_provides_injected_document_text(self):
-        """依賴注入：模型呼叫工具後，工具回傳的文件內容正是注入的 document_text"""
-        captured = {}
-
-        async def fake_model(messages, info):
-            # 工具已回傳 → 擷取其內容並結束
-            for message in messages:
-                for part in message.parts:
-                    if isinstance(part, ToolReturnPart) and part.tool_name == 'get_document_text':
-                        captured['doc'] = str(part.content)
-                        return ModelResponse(parts=[TextPart('已根據文件回答')])
-            # 尚未呼叫工具 → 先呼叫工具
-            return ModelResponse(parts=[
-                ToolCallPart(tool_name='get_document_text', args={}, tool_call_id='c1')
-            ])
-
-        with _get_doc_agent().override(model=FunctionModel(fake_model)):
-            answer = await AIService().ask('文件重點？', '這份文件介紹 Docker 容器化技術')
-
-        assert answer == '已根據文件回答'
-        assert captured['doc'] == '這份文件介紹 Docker 容器化技術'
-
-    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
-    async def test_empty_question_error(self):
-        """測試空問題錯誤"""
-        with pytest.raises(ValueError, match="Question cannot be empty"):
-            await AIService().ask('', '文件內容')
-
-    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='')
-    async def test_not_configured_error(self):
-        """測試 API Key 未配置錯誤"""
-        with pytest.raises(RuntimeError, match="AI 服務未配置"):
-            await AIService().ask('問題', '文件內容')
-
-    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
     async def test_ask_stream_yields_chunks(self):
         """串流文件問答：deps + 工具跑通，逐塊 yield 的 delta 拼接後等於完整答案"""
         with _get_doc_agent().override(model=TestModel(custom_output_text="這是串流答案")):
@@ -324,6 +234,43 @@ class TestDocQA:
         with pytest.raises(RuntimeError, match="AI 服務未配置"):
             async for _ in AIService().ask_stream('問題', '文件內容'):
                 pass
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_ask_stream_exposes_document_tool(self):
+        """end-to-end 跑通 deps + 工具；agent 對外曝露 get_document_text 工具"""
+        model = TestModel()
+        with _get_doc_agent().override(model=model):
+            chunks = [
+                c async for c in AIService().ask_stream('這份文件在說什麼？', '介紹 Docker 的文件')
+            ]
+
+        assert isinstance(''.join(chunks), str)
+        tool_names = [t.name for t in model.last_model_request_parameters.function_tools]
+        assert tool_names == ['get_document_text']
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_ask_stream_tool_provides_injected_document_text(self):
+        """依賴注入：模型呼叫工具後，工具回傳的文件內容正是注入的 document_text"""
+        captured = {}
+
+        async def fake_stream(messages, info):
+            # 工具已回傳 → 擷取其內容並輸出答案
+            for message in messages:
+                for part in message.parts:
+                    if isinstance(part, ToolReturnPart) and part.tool_name == 'get_document_text':
+                        captured['doc'] = str(part.content)
+                        yield '已根據文件回答'
+                        return
+            # 尚未呼叫工具 → 先呼叫工具
+            yield {0: DeltaToolCall(name='get_document_text', json_args='{}', tool_call_id='c1')}
+
+        with _get_doc_agent().override(model=FunctionModel(stream_function=fake_stream)):
+            chunks = [
+                c async for c in AIService().ask_stream('文件重點？', '這份文件介紹 Docker 容器化技術')
+            ]
+
+        assert ''.join(chunks) == '已根據文件回答'
+        assert captured['doc'] == '這份文件介紹 Docker 容器化技術'
 
 
 class TestAIRateLimiter:
@@ -367,44 +314,3 @@ class TestAIRateLimiter:
 
             # 發生錯誤時應該返回 True（fail-open）
             assert result is True
-
-
-class TestAISchemas:
-    """AI Schema 驗證測試"""
-
-    def test_ai_process_request_valid_summarize(self):
-        """測試有效的摘要請求"""
-        request = AIProcessRequest(action='summarize', text='測試文字')
-        assert request.action == 'summarize'
-        assert request.text == '測試文字'
-
-    def test_ai_process_request_valid_polish(self):
-        """測試有效的潤稿請求"""
-        request = AIProcessRequest(action='polish', text='測試文字')
-        assert request.action == 'polish'
-        assert request.text == '測試文字'
-
-    def test_ai_process_request_invalid_action(self):
-        """測試無效的操作類型"""
-        with pytest.raises(ValidationError):
-            AIProcessRequest(action='invalid', text='測試文字')
-
-    def test_ai_process_response(self):
-        """測試回應 Schema"""
-        response = AIProcessResponse(
-            success=True,
-            result='結果',
-            action='summarize'
-        )
-        assert response.success is True
-        assert response.result == '結果'
-        assert response.error is None
-
-        response_with_error = AIProcessResponse(
-            success=False,
-            result='',
-            action='summarize',
-            error='錯誤訊息'
-        )
-        assert response_with_error.success is False
-        assert response_with_error.error == '錯誤訊息'

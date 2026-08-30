@@ -363,10 +363,10 @@ Document.objects.filter(owner=user)
   - 輸入截斷（≤5000 字元）控制 token 成本
 
 **6.2 純文字處理（摘要 / 潤稿）**
-- 閱讀檔案：`backend/docs_app/ai_api.py`（`process_text`）、`ai_service.py`（`process`）
+- 閱讀檔案：`ai_service.py`（`process_stream`、`PROMPTS`）
 - 關鍵概念：
   - `PROMPTS` 模板組合
-  - `agent.run()` 回傳純文字 `result.output`
+  - 純文字結果不走 HTTP，直接以 `agent.run_stream()` 逐字回傳（見 6.5）
   - 錯誤處理：429 配額用盡 vs 服務暫時無法使用 vs 未配置
 
 **6.3 結構化輸出（校對 / 文件分析）**
@@ -377,7 +377,7 @@ Document.objects.filter(owner=user)
   - 相較純文字，結構化輸出讓前端能逐項渲染（校對建議、metadata 欄位）
 
 **6.4 依賴注入與工具（文件問答）**
-- 閱讀檔案：`ai_service.py`（`ask`、`DocDeps`、`get_document_text` 工具）、`ai_api.py`（`ask_document`）
+- 閱讀檔案：`ai_service.py`（`ask_stream`、`DocDeps`、`get_document_text` 工具）
 - 關鍵概念：
   - `deps_type=DocDeps` 把整份文件當依賴注入
   - `@agent.tool` 讓 agent 主動呼叫工具讀取文件內容（`RunContext.deps`）
@@ -392,12 +392,12 @@ Document.objects.filter(owner=user)
   - chunk 只回給發送者本人（`self.send`，不經 `group_send`）
   - 摘要/潤稿與文件問答共用 consumer 的泛用串流封裝 `_run_ai_stream()`，差別只在串流來源與輸入驗證
   - 可取消的背景 asyncio 任務：使用者停止生成 / 斷線時清理
-  - 與 HTTP `/ai/process` 共用同一 Redis 速率限制額度
+  - 與 HTTP AI 端點（校對 / 分析）共用同一 Redis 速率限制額度
 
 **6.6 速率限制與測試**
 - 閱讀檔案：`backend/docs_app/ai_rate_limiter.py`、`tests/test_ai_api.py`
 - 關鍵概念：
-  - 四個 HTTP 端點 + 串流共用額度鍵 `ai:{user_id}`（每用戶 10 次 / 60 秒）
+  - 兩個 HTTP 端點 + 串流共用額度鍵 `ai:{user_id}`（每用戶 10 次 / 60 秒）
   - fail-open 策略（與 WebSocket 連接管理 fail-closed 的差異與理由）
   - 測試以 `TestModel` / `FunctionModel` + `agent.override()` 取代對 SDK 內部的脆弱 mock
 

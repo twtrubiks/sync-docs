@@ -323,10 +323,12 @@ AI 功能以 **Pydantic AI** 串接 LLM，依 `AI_PROVIDER` 在 **NVIDIA NIM**�
 用戶在編輯器中選取文字（或整份文件），選擇 AI 功能
 ─────────────────────────────────────────────────
 
+校對 / 文件分析走 HTTP（下圖）；摘要 / 潤稿 / 文件問答走既有 WebSocket 逐字串流（見下節）
+
 ┌─────────┐                                    ┌──────────────┐
-│ 前端     │  POST /api/ai/process              │  AIController │
-│ AI      │       /proofread /metadata /ask    ├──────────────┤
-│ Dialog  │  {action / text / question ...}    │ 1. JWT 認證   │
+│ 前端     │  POST /api/ai/proofread            │  AIController │
+│ AI      │       /api/ai/metadata             ├──────────────┤
+│ Dialog  │  {text}                            │ 1. JWT 認證   │
 ├─────────┤                                    │ 2. 速率限制   │
 │ 30s     ├───────────────────────────────────▶│   (Redis)    │
 │ 超時     │                                    └──────┬───────┘
@@ -348,30 +350,30 @@ AI 功能以 **Pydantic AI** 串接 LLM，依 `AI_PROVIDER` 在 **NVIDIA NIM**�
 │         │                       │  依 AI_PROVIDER 切換、各 agent 共用     │
 │         │                       └───────────────────┬───────────────────┘
 │         │◀──────────────────────────────────────────┤
-│         │  {success, result / answer / ...}         │
+│         │  {success, result}                        │
 │ 顯示     │
 │ 結果     │
 └─────────┘
 ```
 
-**AI 端點：**
+**AI HTTP 端點：**
 
 | 端點 | 用途 | 回傳型別 | Pydantic AI 重點 |
 |------|------|---------|------------------|
-| `POST /ai/process` | 摘要 / 潤稿 | 純文字 | 共用 agent；另有 WebSocket 串流版（見下） |
 | `POST /ai/proofread` | 結構化校對（逐項建議 + 整體分數） | `ProofreadResult` | `output_type` 型別安全輸出 + 自動驗證/重試 |
 | `POST /ai/metadata` | 文件分析（摘要 / 標籤 / 語言 / 閱讀時間） | `DocumentMetadata` | `output_type` 結構化輸出 |
-| `POST /ai/ask` | 文件問答 | 純文字答案 | `deps_type` 依賴注入 + `@agent.tool` 讀取文件；另有 WebSocket 串流版（見下） |
+
+摘要 / 潤稿與文件問答沒有 HTTP 版本，只走 WebSocket 串流（見下）。
 
 **架構要點：**
 
 | 層級 | 檔案 | 職責 |
 |------|------|------|
-| API | `ai_api.py` | 認證、速率限制檢查、回應格式 |
+| API | `ai_api.py` | HTTP 端點（校對 / 分析）：認證、速率限制檢查、回應格式 |
 | 服務 | `ai_service.py` | Pydantic AI agent 組合、供應商切換、Prompt、錯誤處理 |
 | 速率限制 | `ai_rate_limiter.py` | Redis Sorted Set 滑動窗口 |
 
-**速率限制：** 每用戶 10 次/60 秒，四個 HTTP 端點與 WebSocket 串流共用同一額度鍵 `ai:{user_id}`，使用 Redis Sorted Set（與 WebSocket 速率限制相同演算法）。AI 速率限制採 fail-open（錯誤時放行），與 WebSocket 連接管理的 fail-closed 策略不同，因為 AI 請求不涉及持續資源佔用。
+**速率限制：** 每用戶 10 次/60 秒，兩個 HTTP 端點與 WebSocket 串流共用同一額度鍵 `ai:{user_id}`，使用 Redis Sorted Set（與 WebSocket 速率限制相同演算法）。AI 速率限制採 fail-open（錯誤時放行），與 WebSocket 連接管理的 fail-closed 策略不同，因為 AI 請求不涉及持續資源佔用。
 
 **Pydantic AI Agent：** 底層 model 與摘要/潤稿、校對、分析、問答各 agent 皆延遲初始化（lazy init），避免模組載入時 Django settings 未就緒；全域單例、共用同一 model（供應商可切換），不重複建立連線。校對與分析以 `output_type` 取得型別安全的結構化結果，問答則以 `deps_type` + `@agent.tool` 注入並讀取整份文件內容。
 
@@ -394,7 +396,7 @@ AI 功能以 **Pydantic AI** 串接 LLM，依 `AI_PROVIDER` 在 **NVIDIA NIM**�
 **要點：**
 
 - **服務層**：`ai_service.process_stream()`（摘要/潤稿）與 `ask_stream()`（文件問答，複用 `deps_type` + `@agent.tool` 的 doc agent）皆以 `agent.run_stream()` + `result.stream_text(delta=True)` 逐塊 yield；consumer 的 `_run_ai_stream()` 是兩者共用的泛用串流封裝（負責 start/chunk/end/error）。
-- **速率限制**：與 HTTP `/ai/process` 共用同一 Redis 額度鍵 `ai:{user_id}`（每次串流算一次），同步限流器以 `sync_to_async` 包裝避免阻塞事件迴圈。
+- **速率限制**：與 HTTP AI 端點共用同一 Redis 額度鍵 `ai:{user_id}`（每次串流算一次），同步限流器以 `sync_to_async` 包裝避免阻塞事件迴圈。
 - **取消與資源**：串流為可取消的背景 `asyncio` 任務；使用者按「停止生成」或連線中斷（`disconnect`）時取消，停止生成後續 token。同一連線同時間僅允許一個串流。
 - **權限**：與 HTTP 一致，僅需認證、不要求文件寫入權限（套用結果才走一般 delta 寫入路徑）。
 
@@ -416,7 +418,7 @@ backend/
     ├── models.py              # 資料模型（Document, Collaborator, Version, Comment）
     ├── api.py                 # 文件 CRUD API
     ├── auth_api.py            # 認證 API（註冊、登入、Token）
-    ├── ai_api.py              # AI API（摘要/潤稿/校對/分析/問答）
+    ├── ai_api.py              # AI HTTP API（校對/分析；摘要/潤稿/問答走 WS 串流）
     ├── comment_api.py         # 評論 API
     ├── ai_service.py          # AI 服務層（Pydantic AI，供應商可切換）
     ├── redis_pool.py          # 統一 Redis 連接池管理

@@ -1,9 +1,9 @@
 """
 AI 服務模組
-使用 Pydantic AI 提供文字摘要和潤稿功能（供應商可切換：NVIDIA NIM 或 Gemini）
+使用 Pydantic AI 提供摘要 / 潤稿 / 校對 / 文件分析 / 文件問答（供應商可切換：NVIDIA NIM 或 Gemini）
 
 依 settings.AI_PROVIDER 決定供應商，惰性建立 model / agent（首次使用時才需要 API key）。
-process(action, text) 介面與回傳純文字維持不變，向下相容既有 ai_api.py 與前端。
+摘要 / 潤稿 / 問答為串流介面（供 WebSocket 逐字回傳）；校對 / 分析為結構化輸出（供 HTTP 端點）。
 """
 
 import logging
@@ -189,44 +189,13 @@ def _get_doc_agent() -> Agent:
 
 
 class AIService:
-    """AI 服務（摘要 / 潤稿），底層為 Pydantic AI agent。"""
-
-    async def process(self, action: str, text: str) -> str:
-        """處理 AI 請求（異步），回傳純文字結果。"""
-        if action not in PROMPTS:
-            raise ValueError(f"Unknown action: {action}")
-
-        if not text.strip():
-            raise ValueError("Text cannot be empty")
-
-        if not _get_api_key():
-            raise RuntimeError("AI 服務未配置")
-
-        # 限制輸入長度（避免 token 過多）
-        max_chars = 5000
-        if len(text) > max_chars:
-            text = text[:max_chars] + "..."
-
-        prompt = PROMPTS[action].format(text=text)
-
-        try:
-            result = await _get_agent().run(prompt)
-            return result.output
-        except ModelHTTPError as e:
-            if getattr(e, "status_code", None) == 429:
-                logger.warning("AI API quota exhausted")
-                raise RuntimeError("API 配額已用盡，請稍後再試")
-            logger.error(f"AI API error: {e}")
-            raise RuntimeError("AI 服務暫時無法使用")
-        except Exception as e:
-            logger.error(f"AI unexpected error: {e}")
-            raise RuntimeError(f"AI 處理失敗：{str(e)}")
+    """AI 服務（摘要 / 潤稿 / 校對 / 分析 / 問答），底層為 Pydantic AI agent。"""
 
     async def process_stream(self, action: str, text: str) -> AsyncIterator[str]:
         """串流處理 AI 請求（摘要/潤稿），逐塊 yield 文字 delta。
 
-        與 process() 共用 PROMPTS 與 agent，差別在以 run_stream 逐塊回傳，
-        供 WebSocket 即時送到前端（打字機效果）。呼叫端取消迭代即停止生成。
+        以 run_stream 逐塊回傳，供 WebSocket 即時送到前端（打字機效果）。
+        呼叫端取消迭代即停止生成。
         """
         if action not in PROMPTS:
             raise ValueError(f"Unknown action: {action}")
@@ -316,41 +285,13 @@ class AIService:
             logger.error(f"AI metadata unexpected error: {e}")
             raise RuntimeError(f"AI 處理失敗：{str(e)}")
 
-    async def ask(self, question: str, document_text: str = "") -> str:
-        """根據整份文件回答問題（agent 透過工具 + 依賴注入讀取文件內容）。"""
-        if not question.strip():
-            raise ValueError("Question cannot be empty")
-
-        if not _get_api_key():
-            raise RuntimeError("AI 服務未配置")
-
-        # 限制文件長度（避免 token 過多）
-        max_chars = 5000
-        if len(document_text) > max_chars:
-            document_text = document_text[:max_chars] + "..."
-
-        try:
-            result = await _get_doc_agent().run(
-                question, deps=DocDeps(document_text=document_text)
-            )
-            return result.output
-        except ModelHTTPError as e:
-            if getattr(e, "status_code", None) == 429:
-                logger.warning("AI API quota exhausted")
-                raise RuntimeError("API 配額已用盡，請稍後再試")
-            logger.error(f"AI API error: {e}")
-            raise RuntimeError("AI 服務暫時無法使用")
-        except Exception as e:
-            logger.error(f"AI ask unexpected error: {e}")
-            raise RuntimeError(f"AI 處理失敗：{str(e)}")
-
     async def ask_stream(
         self, question: str, document_text: str = ""
     ) -> AsyncIterator[str]:
-        """串流版文件問答：agent 透過工具讀取文件後，逐塊 yield 答案 delta。
+        """串流文件問答：doc agent 透過 deps + 工具讀取文件後，逐塊 yield 答案 delta。
 
-        與 ask() 共用 doc agent（deps + 工具），差別在以 run_stream 逐塊回傳，
-        供 WebSocket 即時送到前端（打字機效果）。呼叫端取消迭代即停止生成。
+        以 run_stream 逐塊回傳，供 WebSocket 即時送到前端（打字機效果）。
+        呼叫端取消迭代即停止生成。
         """
         if not question.strip():
             raise ValueError("Question cannot be empty")

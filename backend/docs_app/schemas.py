@@ -225,20 +225,6 @@ class RestoreVersionResponseSchema(Schema):
 
 # ============ AI 相關 Schema ============
 
-class AIProcessRequest(Schema):
-    """AI 處理請求"""
-    action: Literal["summarize", "polish"]
-    text: str  # 最大長度在 ai_service.py 中處理（5000 字元）
-
-
-class AIProcessResponse(Schema):
-    """AI 處理回應"""
-    success: bool
-    result: str
-    action: str
-    error: Optional[str] = None
-
-
 class WritingIssue(BaseModel):
     """單一寫作問題的結構化建議（proofread agent 輸出項目）"""
     original: str = Field(description="原文中有問題的片段，需與原文完全一致以利前端定位")
@@ -282,19 +268,6 @@ class MetadataResponse(Schema):
     """AI metadata 回應（成功時 result 為結構化的 DocumentMetadata）"""
     success: bool
     result: Optional[DocumentMetadata] = None
-    error: Optional[str] = None
-
-
-class AskRequest(Schema):
-    """AI 文件問答請求"""
-    question: str
-    document_text: str = ""  # 整份文件純文字（供 agent 透過工具讀取；最大長度在 ai_service.py 處理）
-
-
-class AskResponse(Schema):
-    """AI 文件問答回應"""
-    success: bool
-    answer: Optional[str] = None
     error: Optional[str] = None
 
 
