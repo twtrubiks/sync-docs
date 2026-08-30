@@ -169,10 +169,14 @@ class CommentController:
         user = self.context.request.auth
         document = self._get_document_with_permission_check(document_id, user, require_write=True)
 
-        # 驗證父評論存在（如果是回覆）
+        # 驗證父評論存在（如果是回覆）。只支援一層回覆：
+        # 前端只載入頂層評論的回覆，回覆的回覆永遠不會被顯示
         parent = None
         if payload.parent_id:
             parent = get_object_or_404(Comment, id=payload.parent_id, document=document)
+            if parent.parent_id is not None:
+                logger.warning(f"用戶 {user.username} 嘗試回覆非頂層評論 {payload.parent_id}")
+                raise HttpError(400, "只能回覆頂層評論")
 
         comment = Comment.objects.create(
             document=document,

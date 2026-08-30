@@ -505,6 +505,24 @@ class TestCommentAPI:
         )
         assert response.status_code == 404
 
+    def test_create_reply_to_reply_rejected(self, authenticated_client, test_document, own_comment):
+        """回覆的回覆會被拒絕：前端只載入頂層評論的回覆，巢狀回覆永遠不會被顯示"""
+        client, user, token = authenticated_client
+        reply = Comment.objects.create(
+            document=test_document,
+            author=user,
+            content="A reply",
+            parent=own_comment
+        )
+        response = client.post(
+            f"/api/documents/{test_document.id}/comments/",
+            data={"content": "Nested reply", "parent_id": str(reply.id)},
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {token}"
+        )
+        assert response.status_code == 400
+        assert Comment.objects.filter(parent=reply).count() == 0
+
     def test_unauthorized_access(self, test_document):
         """測試未認證訪問"""
         client = Client()
