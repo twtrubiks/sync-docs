@@ -729,3 +729,21 @@ def test_non_collaborator_cannot_read_comments(another_user, test_document):
         HTTP_AUTHORIZATION=f"Bearer {AccessToken.for_user(another_user)}",
     )
     assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_read_only_collaborator_can_read_comments_and_replies(readonly_client, read_only_shared_document, test_user):
+    """唯讀協作者不能發表評論，但可以閱讀評論與回覆"""
+    client, _, token = readonly_client
+    parent = Comment.objects.create(document=read_only_shared_document, author=test_user, content="p")
+    Comment.objects.create(document=read_only_shared_document, author=test_user, content="r", parent=parent)
+    auth = {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+    base = f"/api/documents/{read_only_shared_document.id}/comments/"
+
+    listed = client.get(base, **auth)
+    replies = client.get(f"{base}{parent.id}/replies/", **auth)
+
+    assert listed.status_code == 200
+    assert [c["content"] for c in listed.json()["comments"]] == ["p"]
+    assert replies.status_code == 200
+    assert [c["content"] for c in replies.json()] == ["r"]

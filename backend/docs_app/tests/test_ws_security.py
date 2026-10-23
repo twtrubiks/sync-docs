@@ -530,6 +530,16 @@ class TestConnectionManagerFieldTTL:
         await asyncio.sleep(1.2)
         assert await manager.add_connection(self.TEST_USER_ID, "channel_new") is True
 
+    async def test_refresh_connection_renews_own_field_ttl(self, manager, redis_client):
+        key = f"ws:connections:user:{self.TEST_USER_ID}"
+        await manager.add_connection(self.TEST_USER_ID, "channel_a")
+        await redis_client.hexpire(key, 5, "channel_a")
+
+        await manager.refresh_connection(self.TEST_USER_ID, "channel_a")
+
+        [ttl] = await redis_client.httl(key, "channel_a")
+        assert 290 < ttl <= manager.CONNECTION_TTL
+
     async def test_legacy_set_key_rebuilt_on_add(self, manager, redis_client):
         """測試舊格式 key（SET + key 級 TTL）在添加連接時被刪除重建"""
         key = f"ws:connections:user:{self.TEST_USER_ID}"
@@ -606,6 +616,22 @@ class TestWSCloseCodes:
         ]
 
         assert len(codes) == len(set(codes)), "Close codes are not unique"
+
+    def test_close_code_values_match_frontend(self):
+        """數值與前端 WS_CLOSE_CODES 寫死的值一致（前端依此決定重連 / 刷新 token / 導頁）"""
+        assert {
+            'AUTH_FAILED': WSCloseCodes.AUTH_FAILED,
+            'TOKEN_EXPIRED': WSCloseCodes.TOKEN_EXPIRED,
+            'PERMISSION_DENIED': WSCloseCodes.PERMISSION_DENIED,
+            'DOCUMENT_NOT_FOUND': WSCloseCodes.DOCUMENT_NOT_FOUND,
+            'TOO_MANY_CONNECTIONS': WSCloseCodes.TOO_MANY_CONNECTIONS,
+        } == {
+            'AUTH_FAILED': 4001,
+            'TOKEN_EXPIRED': 4002,
+            'PERMISSION_DENIED': 4003,
+            'DOCUMENT_NOT_FOUND': 4004,
+            'TOO_MANY_CONNECTIONS': 4005,
+        }
 
 
 class TestRateLimiterSlidingWindow:

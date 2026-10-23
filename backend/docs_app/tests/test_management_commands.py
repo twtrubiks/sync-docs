@@ -64,6 +64,7 @@ def test_list_shows_channels_and_field_ttl(redis_client):
 
     output = run_command("--list")
 
+    assert "Found 2 connection key(s):" in output
     assert f"User {USER_A}:" in output
     assert f"User {USER_B}:" in output
     assert "Connections (2):" in output
