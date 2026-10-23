@@ -393,4 +393,171 @@ describe('VersionHistoryPanel', () => {
 		expect(screen.getByText('版本歷史')).toBeInTheDocument();
 		expect(screen.getByText('還原到版本 2').closest('button')).not.toBeDisabled();
 	});
+
+	function deferred<T>() {
+		let resolve!: (value: T) => void;
+		let reject!: (reason: unknown) => void;
+		const promise = new Promise<T>((res, rej) => {
+			resolve = res;
+			reject = rej;
+		});
+		return { promise, resolve, reject };
+	}
+
+	const olderPage = (page: number, total_pages: number) => ({
+		items: [
+			{
+				id: `version-old-${page}`,
+				version_number: -page,
+				created_at: '2024-01-15T08:00:00Z',
+				created_by_username: 'testuser'
+			}
+		],
+		total: 3,
+		page,
+		page_size: 20,
+		total_pages
+	});
+
+	describe('closing', () => {
+		it.each([
+			['the close button', () => fireEvent.click(screen.getByLabelText('關閉'))],
+			['the backdrop', () => fireEvent.click(screen.getByLabelText('關閉版本歷史'))],
+			[
+				'Escape on the backdrop',
+				() => fireEvent.keyDown(screen.getByLabelText('關閉版本歷史'), { key: 'Escape' })
+			]
+		])('closes with %s', async (_label, close) => {
+			render(VersionHistoryPanel, { props: { documentId: 'doc-123', isOpen: true } });
+			await screen.findByText('版本 2');
+
+			await close();
+
+			expect(screen.queryByText('版本歷史')).toBeNull();
+		});
+
+		it('ignores other keys on the backdrop', async () => {
+			render(VersionHistoryPanel, { props: { documentId: 'doc-123', isOpen: true } });
+
+			await fireEvent.keyDown(screen.getByLabelText('關閉版本歷史'), { key: 'Enter' });
+
+			expect(screen.getByText('版本歷史')).toBeInTheDocument();
+		});
+	});
+
+	describe('loading more', () => {
+		it('disables the button while loading and loads each page once', async () => {
+			const next = deferred<ReturnType<typeof olderPage>>();
+			vi.mocked(getVersions)
+				.mockResolvedValueOnce({ ...mockPaginatedResponse, page: 1, total_pages: 3 })
+				.mockReturnValueOnce(next.promise)
+				.mockResolvedValueOnce(olderPage(3, 3));
+			render(VersionHistoryPanel, { props: { documentId: 'doc-123', isOpen: true } });
+			const loadMore = (await screen.findByText('載入更多版本')).closest('button')!;
+
+			await fireEvent.click(loadMore);
+			expect(loadMore).toBeDisabled();
+			expect(loadMore).toHaveTextContent('載入中...');
+			await fireEvent.click(loadMore); // 載入中再點一次不應重複請求同一頁
+			expect(getVersions).toHaveBeenCalledTimes(2);
+
+			next.resolve(olderPage(2, 3));
+			expect(await screen.findByText('版本 -2')).toBeInTheDocument();
+			expect(screen.getByText('載入更多版本').closest('button')).not.toBeDisabled();
+
+			await fireEvent.click(screen.getByText('載入更多版本'));
+			expect(await screen.findByText('版本 -3')).toBeInTheDocument();
+			expect(getVersions).toHaveBeenLastCalledWith('doc-123', 3);
+		});
+
+		it('reports failures and lets the user retry', async () => {
+			vi.mocked(getVersions)
+				.mockResolvedValueOnce({ ...mockPaginatedResponse, page: 1, total_pages: 2 })
+				.mockRejectedValueOnce(new Error('boom'));
+			render(VersionHistoryPanel, { props: { documentId: 'doc-123', isOpen: true } });
+
+			await fireEvent.click(await screen.findByText('載入更多版本'));
+
+			await waitFor(() => expect(toastError).toHaveBeenCalledWith('載入更多版本失敗'));
+			expect(screen.getByText('載入更多版本').closest('button')).not.toBeDisabled();
+		});
+	});
+
+	describe('previews', () => {
+		it('shows a loading state, then the unavailable message when loading fails', async () => {
+			const detail = deferred<never>();
+			vi.mocked(getVersionDetail).mockReturnValue(detail.promise);
+			render(VersionHistoryPanel, { props: { documentId: 'doc-123', isOpen: true } });
+
+			await fireEvent.click(await screen.findByText('版本 2'));
+			expect(screen.getByText('版本 2 預覽')).toBeInTheDocument();
+			expect(screen.getByText('載入中...')).toBeInTheDocument();
+			expect(screen.queryByText('無法載入內容')).toBeNull();
+
+			detail.reject(new Error('boom'));
+			expect(await screen.findByText('無法載入內容')).toBeInTheDocument();
+			expect(screen.queryByText('載入中...')).toBeNull();
+		});
+
+		it('does not show the unavailable message once content is loaded', async () => {
+			await openAndSelect();
+
+			await waitFor(() => expect(screen.queryByText('載入中...')).toBeNull());
+			expect(screen.queryByText('無法載入內容')).toBeNull();
+		});
+
+		it('skips rendering content without ops', async () => {
+			quillMock.instances.length = 0;
+			vi.mocked(getVersionDetail).mockResolvedValue({
+				...mockVersionItems[0],
+				content: {}
+			});
+			render(VersionHistoryPanel, { props: { documentId: 'doc-123', isOpen: true } });
+
+			await fireEvent.click(await screen.findByText('版本 2'));
+
+			await waitFor(() => expect(quillMock.instances).toHaveLength(1));
+			expect(quillMock.instances[0].setContents).not.toHaveBeenCalled();
+		});
+
+		it('highlights only the selected version', async () => {
+			await openAndSelect();
+
+			const selected = screen.getByText('版本 2').closest('button')!;
+			const other = screen.getByText('版本 1').closest('button')!;
+			expect(selected).toHaveClass('border-primary-500');
+			expect(other).not.toHaveClass('border-primary-500');
+			expect(other).toHaveClass('border-transparent');
+		});
+
+		it('formats version times in zh-TW', async () => {
+			render(VersionHistoryPanel, { props: { documentId: 'doc-123', isOpen: true } });
+
+			const expected = new Date('2024-01-15T10:30:00Z').toLocaleString('zh-TW', {
+				month: 'short',
+				day: 'numeric',
+				hour: '2-digit',
+				minute: '2-digit'
+			});
+			expect(await screen.findByText(expected)).toBeInTheDocument();
+		});
+	});
+
+	it('disables restoring while a restore is in progress and restores only once', async () => {
+		const restore = deferred<{ success: boolean; message: string; new_version_number: number }>();
+		vi.mocked(restoreVersion).mockReturnValue(restore.promise);
+		await openAndSelect();
+
+		await fireEvent.click(screen.getByText('還原到版本 2'));
+		await fireEvent.click(screen.getByText('還原'));
+
+		const button = screen.getByText('還原中...').closest('button')!;
+		expect(button).toBeDisabled();
+		await fireEvent.click(button);
+		expect(screen.queryByRole('alertdialog')).toBeNull();
+		expect(restoreVersion).toHaveBeenCalledTimes(1);
+
+		restore.resolve({ success: true, message: 'ok', new_version_number: 3 });
+		await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('ok'));
+	});
 });

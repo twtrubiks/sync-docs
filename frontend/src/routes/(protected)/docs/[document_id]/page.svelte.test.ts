@@ -97,8 +97,15 @@ vi.mock('$lib/components/AIAskDialog.svelte', () => ({
 	default: capture('AIAskDialog')
 }));
 
+// 頁面以 bind:this 取得 CommentPanel 實例，把 comment_* WS 事件轉交給它
+const commentPanelExports = vi.hoisted(() => ({
+	addCommentFromWS: vi.fn(),
+	updateCommentFromWS: vi.fn(),
+	removeCommentFromWS: vi.fn()
+}));
+
 vi.mock('$lib/components/CommentPanel.svelte', () => ({
-	default: capture('CommentPanel')
+	default: capture('CommentPanel', commentPanelExports)
 }));
 
 // Import after mocks
@@ -1227,5 +1234,688 @@ describe('Document Page - sharing and deleting', () => {
 
 		await waitFor(() => expect(toastError).toHaveBeenCalledWith('刪除文件失敗'));
 		expect(goto).not.toHaveBeenCalled();
+	});
+});
+
+describe('Document Page - edit state, socket guards and cleanup', () => {
+	let editor: ReturnType<typeof createFakeEditor>;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		setupBrowserMocks();
+		vi.mocked(get).mockResolvedValue(mockDoc);
+		editor = createFakeEditor();
+		harness.editor = editor;
+		harness.props = {};
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+		harness.editor = null;
+	});
+
+	async function ready() {
+		const view = render(Page);
+		await waitFor(() => expect(globalThis.WebSocket).toHaveBeenCalled());
+		await waitFor(() => expect(harness.props.QuillEditor).toBeDefined());
+		const ws = vi.mocked(globalThis.WebSocket).mock.instances[0] as unknown as MockWebSocket;
+		ws.onopen!({});
+		return { ws, unmount: view.unmount };
+	}
+
+	function quill() {
+		return harness.props.QuillEditor as {
+			value: unknown;
+			onTextChange: (d: { delta: unknown; source: string }) => void;
+			onSelectionChange: (r: { index: number; length: number } | null) => void;
+		};
+	}
+
+	function type(text: string) {
+		quill().onTextChange({ delta: { ops: [{ insert: text }] }, source: 'user' });
+	}
+
+	function sent(ws: MockWebSocket) {
+		return ws.send.mock.calls.map(([raw]) => JSON.parse(raw as string));
+	}
+
+	function receive(ws: MockWebSocket, data: Record<string, unknown>) {
+		ws.onmessage!({ data: JSON.stringify(data) });
+	}
+
+	function status() {
+		return document.querySelector('.doc-status')!.textContent;
+	}
+
+	const lastSaveAt = (iso: string) => `Last save at ${new Date(iso).toLocaleTimeString()}`;
+
+	describe('loading', () => {
+		it('hands the loaded content to the editor, or an empty delta when there is none', async () => {
+			await ready();
+			expect(quill().value).toEqual(mockDoc.content);
+
+			const { content: _ignored, ...withoutContent } = mockDoc;
+			vi.mocked(get).mockResolvedValue(withoutContent);
+			harness.props = {};
+			render(Page);
+			await waitFor(() => expect(harness.props.QuillEditor).toBeDefined());
+			expect(quill().value).toEqual({ ops: [] });
+		});
+
+		it('shows Ready when the document has never been saved', async () => {
+			const { updated_at: _ignored, ...neverSaved } = mockDoc;
+			vi.mocked(get).mockResolvedValue(neverSaved);
+
+			await ready();
+
+			await waitFor(() => expect(status()).toBe('Ready'));
+		});
+
+		it('shows the load failure in the status bar and hides the toolbar', async () => {
+			vi.mocked(get).mockRejectedValue(new Error('boom'));
+			render(Page);
+
+			await screen.findByTestId('error-state');
+
+			expect(status()).toBe('Failed to load document');
+			expect(screen.queryByTitle('評論')).toBeNull();
+			expect(screen.queryByTitle('AI Writing Assistant')).toBeNull();
+		});
+
+		it('does not open a socket without an access token', async () => {
+			vi.mocked(localStorage.removeItem)('access_token');
+
+			render(Page);
+
+			expect(await screen.findByText('Error saving document')).toBeInTheDocument();
+			expect(globalThis.WebSocket).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('toolbar and side panels', () => {
+		it('opens the comment panel and version history from the toolbar', async () => {
+			await ready();
+
+			await fireEvent.click(screen.getByTitle('評論'));
+			await fireEvent.click(screen.getByTitle('版本歷史'));
+
+			expect(harness.props.CommentPanel.isOpen).toBe(true);
+			expect(harness.props.VersionHistoryPanel.isOpen).toBe(true);
+		});
+
+		it('passes identity and permissions to the comment panel', async () => {
+			const { ws } = await ready();
+			receive(ws, { type: 'connection_success', can_write: false, user_id: '7' });
+
+			await waitFor(() => expect(harness.props.CommentPanel.canWrite).toBe(false));
+			expect(harness.props.CommentPanel.currentUserId).toBe('7');
+			expect(harness.props.CommentPanel.isOwner).toBe(true);
+			expect(harness.props.CommentPanel.documentId).toBe('test-doc-123');
+		});
+
+		it('disables the AI writing assistant for read-only users', async () => {
+			const { ws } = await ready();
+			expect(screen.getByTitle('AI Writing Assistant')).not.toBeDisabled();
+
+			receive(ws, { type: 'permission_update', can_write: false });
+
+			await waitFor(() => expect(screen.getByTitle('AI Writing Assistant')).toBeDisabled());
+		});
+
+		it('tells version history how many other people are online', async () => {
+			const { ws } = await ready();
+			expect(harness.props.VersionHistoryPanel.onlineOthersCount).toBe(0);
+
+			receive(ws, { type: 'connection_success', can_write: true, user_id: '1' });
+			receive(ws, {
+				type: 'presence_sync',
+				users: [
+					{ user_id: '1', username: 'me', color: '#111111' },
+					{ user_id: '2', username: 'alice', color: '#222222' },
+					{ user_id: '3', username: 'bob', color: '#333333' }
+				]
+			});
+
+			await waitFor(() => expect(harness.props.VersionHistoryPanel.onlineOthersCount).toBe(2));
+		});
+
+		it('relays comment events to the comment panel', async () => {
+			const { ws } = await ready();
+			const comment = { id: 1, content: 'hi', parent_id: null };
+
+			receive(ws, { type: 'comment_add', comment });
+			receive(ws, { type: 'comment_update', comment_id: 1, content: 'edited', updated_at: 'T1' });
+			receive(ws, { type: 'comment_delete', comment_id: 5, parent_id: 1 });
+			receive(ws, { type: 'comment_delete', comment_id: 1 });
+
+			expect(commentPanelExports.addCommentFromWS).toHaveBeenCalledWith(comment);
+			expect(commentPanelExports.updateCommentFromWS).toHaveBeenCalledWith(1, 'edited', 'T1');
+			expect(commentPanelExports.removeCommentFromWS).toHaveBeenNthCalledWith(1, 5, 1);
+			// 沒帶 parent_id 的頂層評論以 null 表示
+			expect(commentPanelExports.removeCommentFromWS).toHaveBeenNthCalledWith(2, 1, null);
+		});
+	});
+
+	describe('connection lifecycle', () => {
+		it('does not announce a restored connection on the first connect', async () => {
+			const { ws } = await ready();
+
+			receive(ws, { type: 'connection_success', can_write: true, user_id: '1' });
+
+			expect(toastSuccess).not.toHaveBeenCalled();
+		});
+
+		it('treats 1001 (going away) as a normal close', async () => {
+			const { ws } = await ready();
+			vi.useFakeTimers();
+
+			ws.onclose!({ code: 1001, reason: '' });
+			await vi.advanceTimersByTimeAsync(60000);
+
+			expect(globalThis.WebSocket).toHaveBeenCalledTimes(1);
+			expect(toastError).not.toHaveBeenCalled();
+		});
+
+		it('treats 4000 as an application error with a default message and no reconnect', async () => {
+			const { ws } = await ready();
+			vi.useFakeTimers();
+
+			ws.onclose!({ code: 4000, reason: '' });
+			await vi.advanceTimersByTimeAsync(60000);
+
+			expect(toastError).toHaveBeenCalledWith('Connection lost. Please refresh the page.');
+			expect(globalThis.WebSocket).toHaveBeenCalledTimes(1);
+			expect(status()).toBe('Error saving document');
+		});
+
+		it('flushes a throttled delta and cancels pending timers when leaving the page', async () => {
+			const { ws, unmount } = await ready();
+			vi.useFakeTimers();
+			type('a'); // 立即送出
+			type('b'); // 在節流窗口內，等待 trailing edge
+			quill().onSelectionChange({ index: 1, length: 0 });
+
+			unmount();
+
+			expect(sent(ws)).toEqual([
+				{ delta: { ops: [{ insert: 'a' }] } },
+				{ delta: { ops: [{ insert: 'b' }] } }
+			]);
+			// 節流、游標與存檔計時器都已取消：之後不會再送出任何東西
+			await vi.advanceTimersByTimeAsync(5000);
+			expect(ws.send).toHaveBeenCalledTimes(2);
+			expect(put).not.toHaveBeenCalled();
+		});
+
+		it('does not flush when the socket is no longer open', async () => {
+			const { ws, unmount } = await ready();
+			vi.useFakeTimers();
+			type('a');
+			ws.readyState = 3; // CLOSED
+			type('b');
+
+			unmount();
+
+			expect(ws.send).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('local edits', () => {
+		it('sends the trailing delta for the rest of the throttle window only', async () => {
+			const { ws } = await ready();
+			vi.useFakeTimers();
+
+			// 節流間隔 150ms：60ms 後的編輯只需再等剩下的 90ms
+			type('a');
+			await vi.advanceTimersByTimeAsync(60);
+			type('b');
+			await vi.advanceTimersByTimeAsync(89);
+			expect(ws.send).toHaveBeenCalledTimes(1);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(ws.send).toHaveBeenCalledTimes(2);
+
+			// 距上次送出剛好一個節流間隔：立即送出
+			await vi.advanceTimersByTimeAsync(150);
+			type('c');
+			expect(sent(ws).at(-1)).toEqual({ delta: { ops: [{ insert: 'c' }] } });
+		});
+
+		it('drops deltas typed while the socket is not open', async () => {
+			const { ws } = await ready();
+			vi.useFakeTimers();
+			ws.readyState = 3; // CLOSED
+
+			type('lost');
+			await vi.advanceTimersByTimeAsync(200);
+			ws.readyState = 1;
+			type('next');
+
+			expect(sent(ws)).toEqual([{ delta: { ops: [{ insert: 'next' }] } }]);
+		});
+
+		it('only sends content when it was edited since the last successful save', async () => {
+			vi.mocked(put).mockResolvedValue({});
+			await ready();
+			const title = screen.getByPlaceholderText('Untitled Document');
+			vi.useFakeTimers();
+
+			await fireEvent.input(title, { target: { value: 'A' } });
+			await vi.advanceTimersByTimeAsync(1500);
+			type('!');
+			await vi.advanceTimersByTimeAsync(1500);
+			await fireEvent.input(title, { target: { value: 'B' } });
+			await vi.advanceTimersByTimeAsync(1500);
+
+			expect(vi.mocked(put).mock.calls.map(([, body]) => body)).toEqual([
+				{ title: 'A' },
+				{ title: 'A', content: { ops: [{ insert: 'Hello world\n' }] } },
+				{ title: 'B' }
+			]);
+		});
+
+		it('a failed title-only save does not start sending content', async () => {
+			vi.mocked(put).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({});
+			await ready();
+			const title = screen.getByPlaceholderText('Untitled Document');
+			vi.useFakeTimers();
+
+			await fireEvent.input(title, { target: { value: 'A' } });
+			await vi.advanceTimersByTimeAsync(1500);
+			await fireEvent.input(title, { target: { value: 'B' } });
+			await vi.advanceTimersByTimeAsync(1500);
+
+			expect(put).toHaveBeenLastCalledWith('/documents/test-doc-123/', { title: 'B' });
+		});
+
+		it('demotion to read-only discards unsent edits and the pending save', async () => {
+			vi.mocked(put).mockResolvedValue({});
+			const { ws } = await ready();
+			vi.useFakeTimers();
+			type('a');
+			type('b');
+
+			receive(ws, { type: 'permission_update', can_write: false });
+			await vi.advanceTimersByTimeAsync(2000);
+
+			expect(sent(ws)).toEqual([{ delta: { ops: [{ insert: 'a' }] } }]);
+			expect(put).not.toHaveBeenCalled();
+			expect(status()).toBe(lastSaveAt(mockDoc.updated_at));
+
+			// 再次升權後只改標題：先前被丟棄的內容編輯不應被當成未存檔內容送出
+			receive(ws, { type: 'permission_update', can_write: true });
+			await fireEvent.input(screen.getByPlaceholderText('Untitled Document'), {
+				target: { value: 'Renamed' }
+			});
+			await vi.advanceTimersByTimeAsync(1500);
+			expect(put).toHaveBeenCalledWith('/documents/test-doc-123/', { title: 'Renamed' });
+		});
+
+		it('a restore from another user discards unsent edits, then settles to idle', async () => {
+			vi.mocked(put).mockResolvedValue({});
+			const { ws } = await ready();
+			vi.useFakeTimers();
+			type('a');
+			type('b');
+
+			receive(ws, {
+				type: 'doc_restored',
+				content: { ops: [{ insert: 'old\n' }] },
+				updated_at: '2026-03-08T09:30:00Z',
+				restored_by: '2',
+				restored_by_username: 'alice',
+				restored_to_version: 1
+			});
+			await vi.advanceTimersByTimeAsync(1999);
+			expect(status()).toBe('All changes saved');
+			await vi.advanceTimersByTimeAsync(1);
+			expect(status()).toBe(lastSaveAt('2026-03-08T09:30:00Z'));
+			expect(sent(ws)).toEqual([{ delta: { ops: [{ insert: 'a' }] } }]);
+			expect(put).not.toHaveBeenCalled();
+
+			await fireEvent.input(screen.getByPlaceholderText('Untitled Document'), {
+				target: { value: 'Renamed' }
+			});
+			await vi.advanceTimersByTimeAsync(1500);
+			expect(put).toHaveBeenCalledWith('/documents/test-doc-123/', { title: 'Renamed' });
+		});
+
+		it('does not hide new unsaved changes when the restore notice times out', async () => {
+			vi.mocked(put).mockImplementation(() => new Promise(() => {}));
+			const { ws } = await ready();
+			vi.useFakeTimers();
+
+			receive(ws, {
+				type: 'doc_restored',
+				content: { ops: [{ insert: 'old\n' }] },
+				updated_at: '2026-03-08T09:30:00Z',
+				restored_by: '2',
+				restored_by_username: 'alice',
+				restored_to_version: 1
+			});
+			await vi.advanceTimersByTimeAsync(1000);
+			await fireEvent.input(screen.getByPlaceholderText('Untitled Document'), {
+				target: { value: 'Renamed' }
+			});
+			await vi.advanceTimersByTimeAsync(1001);
+
+			expect(status()).toBe('Unsaved changes');
+		});
+	});
+
+	describe('cursor sharing', () => {
+		it('does not send cursors while the socket is not open', async () => {
+			const { ws } = await ready();
+			vi.useFakeTimers();
+
+			ws.readyState = 3;
+			quill().onSelectionChange({ index: 1, length: 0 });
+			await vi.advanceTimersByTimeAsync(500);
+
+			expect(ws.send).not.toHaveBeenCalled();
+		});
+
+		it('drops a throttled cursor when the socket closes before it is sent', async () => {
+			const { ws } = await ready();
+			vi.useFakeTimers();
+
+			quill().onSelectionChange({ index: 1, length: 0 });
+			ws.readyState = 3;
+			await vi.advanceTimersByTimeAsync(500);
+
+			expect(ws.send).not.toHaveBeenCalled();
+		});
+
+		it('starts a new throttle window after each send', async () => {
+			const { ws } = await ready();
+			vi.useFakeTimers();
+
+			quill().onSelectionChange({ index: 1, length: 0 });
+			await vi.advanceTimersByTimeAsync(100);
+			quill().onSelectionChange({ index: 2, length: 0 });
+			await vi.advanceTimersByTimeAsync(50);
+			expect(sent(ws)).toEqual([{ type: 'cursor_move', index: 2, length: 0 }]);
+
+			quill().onSelectionChange({ index: 3, length: 0 });
+			await vi.advanceTimersByTimeAsync(149);
+			expect(ws.send).toHaveBeenCalledTimes(1);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(sent(ws).at(-1)).toEqual({ type: 'cursor_move', index: 3, length: 0 });
+		});
+	});
+
+	describe('AI streams', () => {
+		function aiDialog() {
+			return harness.props.AIDialog as {
+				onStream: (action: string, text: string) => boolean;
+				onApply: (text: string) => void;
+				onCancelStream: () => void;
+				streaming: boolean;
+				streamText: string;
+			};
+		}
+
+		function askDialog() {
+			return harness.props.AIAskDialog as {
+				isOpen: boolean;
+				onAsk: (q: string, t: string) => boolean;
+				streaming: boolean;
+				streamText: string;
+			};
+		}
+
+		it('requires a non-empty selection for the writing assistant', async () => {
+			editor.selection = { index: 3, length: 0 };
+			await ready();
+
+			await fireEvent.click(screen.getByTitle('AI Writing Assistant'));
+
+			expect(toastWarning).toHaveBeenCalledWith('Please select text first');
+			expect(harness.props.AIDialog.isOpen).toBe(false);
+		});
+
+		it('ignores an apply without a saved selection', async () => {
+			await ready();
+
+			aiDialog().onApply('new text');
+
+			expect(editor.deleteText).not.toHaveBeenCalled();
+			expect(editor.insertText).not.toHaveBeenCalled();
+		});
+
+		it('a normal stream end is not reported as an error', async () => {
+			const { ws } = await ready();
+			aiDialog().onStream('summarize', 'abc');
+
+			receive(ws, { type: 'ai_stream_end', action: 'summarize' });
+
+			await waitFor(() => expect(aiDialog().streaming).toBe(false));
+			expect(toastError).not.toHaveBeenCalled();
+		});
+
+		it('a stream error stops streaming', async () => {
+			const { ws } = await ready();
+			aiDialog().onStream('summarize', 'abc');
+			await waitFor(() => expect(aiDialog().streaming).toBe(true));
+
+			receive(ws, { type: 'ai_stream_error', message: 'boom' });
+
+			await waitFor(() => expect(aiDialog().streaming).toBe(false));
+		});
+
+		it('ignores chunks without text', async () => {
+			const { ws } = await ready();
+			aiDialog().onStream('summarize', 'abc');
+
+			receive(ws, { type: 'ai_stream_chunk', chunk: '摘' });
+			receive(ws, { type: 'ai_stream_chunk' });
+
+			await waitFor(() => expect(aiDialog().streamText).toBe('摘'));
+		});
+
+		it('cancelling with a closed socket only stops the local stream', async () => {
+			const { ws } = await ready();
+			aiDialog().onStream('summarize', 'abc');
+			ws.readyState = 3;
+
+			aiDialog().onCancelStream();
+
+			expect(sent(ws)).toEqual([{ type: 'ai_stream', action: 'summarize', text: 'abc' }]);
+			await waitFor(() => expect(aiDialog().streaming).toBe(false));
+		});
+
+		it('asking marks the stream as running and clears previous output', async () => {
+			const { ws } = await ready();
+			aiDialog().onStream('polish', 'abc');
+			receive(ws, { type: 'ai_stream_chunk', chunk: '舊' });
+			receive(ws, { type: 'ai_stream_end' });
+			await waitFor(() => expect(askDialog().streamText).toBe('舊'));
+
+			expect(askDialog().onAsk('重點？', '全文')).toBe(true);
+
+			await waitFor(() => expect(askDialog().streaming).toBe(true));
+			expect(askDialog().streamText).toBe('');
+		});
+
+		it('refuses to ask when the socket is not open', async () => {
+			const { ws } = await ready();
+			ws.readyState = 3;
+
+			expect(askDialog().onAsk('重點？', '全文')).toBe(false);
+
+			expect(toastError).toHaveBeenCalledWith('連線中斷，無法使用 AI 串流');
+			expect(ws.send).not.toHaveBeenCalled();
+			expect(askDialog().streaming).toBe(false);
+		});
+
+		it('opening document Q&A resets output left over from another stream', async () => {
+			const { ws } = await ready();
+			aiDialog().onStream('polish', 'abc');
+			receive(ws, { type: 'ai_stream_chunk', chunk: '殘留' });
+			await waitFor(() => expect(askDialog().streamText).toBe('殘留'));
+
+			await fireEvent.click(screen.getByTitle('文件問答'));
+
+			expect(askDialog().isOpen).toBe(true);
+			expect(askDialog().streamText).toBe('');
+			expect(askDialog().streaming).toBe(false);
+		});
+	});
+
+	describe('version restore reload', () => {
+		function restore() {
+			return (harness.props.VersionHistoryPanel as { onRestore: () => Promise<void> }).onRestore();
+		}
+
+		it('returns to idle two seconds after reloading', async () => {
+			await ready();
+			vi.mocked(get).mockResolvedValue({ ...mockDoc, updated_at: '2026-03-09T09:00:00Z' });
+			vi.useFakeTimers();
+
+			await restore();
+			await vi.advanceTimersByTimeAsync(1999);
+			expect(status()).toBe('All changes saved');
+			await vi.advanceTimersByTimeAsync(1);
+
+			expect(status()).toBe(lastSaveAt('2026-03-09T09:00:00Z'));
+		});
+
+		it('keeps new unsaved changes visible after the restore notice times out', async () => {
+			vi.mocked(put).mockImplementation(() => new Promise(() => {}));
+			await ready();
+			vi.useFakeTimers();
+
+			await restore();
+			await vi.advanceTimersByTimeAsync(1000);
+			await fireEvent.input(screen.getByPlaceholderText('Untitled Document'), {
+				target: { value: 'Renamed' }
+			});
+			await vi.advanceTimersByTimeAsync(1001);
+
+			expect(status()).toBe('Unsaved changes');
+		});
+
+		it('reports a failed reload', async () => {
+			await ready();
+			vi.mocked(get).mockRejectedValue(new Error('offline'));
+
+			await restore();
+
+			expect(toastError).toHaveBeenCalledWith('Failed to reload document.');
+			expect(editor.setContents).not.toHaveBeenCalled();
+		});
+
+		it('falls back to an empty document when the reloaded version has no content', async () => {
+			await ready();
+			const { content: _ignored, ...withoutContent } = mockDoc;
+			vi.mocked(get).mockResolvedValue(withoutContent);
+
+			await restore();
+
+			expect(editor.setContents).toHaveBeenCalledWith([], 'silent');
+		});
+	});
+});
+
+describe('Document Page - share modal details', () => {
+	const alice = { id: 2, username: 'alice', email: 'alice@example.com', permission: 'read' };
+	const bob = { id: 3, username: 'bob', email: 'bob@example.com', permission: 'write' };
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		setupBrowserMocks();
+		harness.editor = null;
+		vi.mocked(get).mockImplementation((url: string) =>
+			Promise.resolve(url.includes('/collaborators/') ? [{ ...alice }, { ...bob }] : mockDoc)
+		);
+	});
+
+	async function openShare() {
+		render(Page);
+		await fireEvent.click(await screen.findByTitle('Share'));
+		await screen.findByLabelText('Change permission for alice');
+	}
+
+	function permissionOf(name: string) {
+		return (screen.getByLabelText(`Change permission for ${name}`) as HTMLSelectElement).value;
+	}
+
+	it('reports when collaborators cannot be loaded', async () => {
+		vi.mocked(get).mockImplementation((url: string) =>
+			url.includes('/collaborators/') ? Promise.reject(new Error('boom')) : Promise.resolve(mockDoc)
+		);
+		render(Page);
+
+		await fireEvent.click(await screen.findByTitle('Share'));
+
+		await waitFor(() => expect(toastError).toHaveBeenCalledWith('Could not load collaborators.'));
+	});
+
+	it('updates only the changed collaborator', async () => {
+		vi.mocked(put).mockResolvedValue({ ...alice, permission: 'write' });
+		await openShare();
+
+		await fireEvent.change(screen.getByLabelText('Change permission for alice'), {
+			target: { value: 'write' }
+		});
+
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith('alice can now edit this document.')
+		);
+		expect(permissionOf('alice')).toBe('write');
+		expect(permissionOf('bob')).toBe('write');
+		expect(screen.getAllByText('bob')).toHaveLength(1);
+	});
+
+	it('removes only the confirmed collaborator', async () => {
+		vi.mocked(del).mockResolvedValue(null);
+		await openShare();
+
+		await fireEvent.click(screen.getAllByTitle('Remove collaborator')[1]);
+		await fireEvent.click(screen.getByText('Remove'));
+
+		await waitFor(() => expect(screen.queryByLabelText('Change permission for bob')).toBeNull());
+		expect(del).toHaveBeenCalledWith('/documents/test-doc-123/collaborators/3/');
+		expect(screen.getByLabelText('Change permission for alice')).toBeInTheDocument();
+	});
+
+	it.each([['Cancel'], ['Close']])(
+		'dismissing the removal confirmation with %s keeps the collaborator',
+		async (button) => {
+			await openShare();
+			await fireEvent.click(screen.getAllByTitle('Remove collaborator')[0]);
+			const dialog = screen
+				.getByText('Remove Collaborator')
+				.closest('.modal-content') as HTMLElement;
+
+			await fireEvent.click(within(dialog).getByRole('button', { name: button }));
+
+			expect(screen.queryByText('Remove Collaborator')).toBeNull();
+			expect(del).not.toHaveBeenCalled();
+			expect(screen.getByLabelText('Change permission for alice')).toBeInTheDocument();
+		}
+	);
+
+	it('shows a generic message when adding fails without an Error', async () => {
+		vi.mocked(post).mockRejectedValue('nope');
+		await openShare();
+
+		await fireEvent.input(screen.getByPlaceholderText('Enter username'), {
+			target: { value: 'carol' }
+		});
+		await fireEvent.click(screen.getByText('Add'));
+
+		await waitFor(() => expect(toastError).toHaveBeenCalledWith('Failed to add collaborator.'));
+	});
+
+	it.each([['Done'], ['Close']])('closes the share modal with %s', async (button) => {
+		await openShare();
+		const modal = screen
+			.getByText('Share "Test Document"')
+			.closest('.modal-content') as HTMLElement;
+
+		await fireEvent.click(within(modal).getAllByRole('button', { name: button })[0]);
+
+		expect(screen.queryByText('Share "Test Document"')).toBeNull();
 	});
 });

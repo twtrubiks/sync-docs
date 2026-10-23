@@ -443,4 +443,106 @@ describe('AIDialog', () => {
 		await waitFor(() => expect(toastError).toHaveBeenCalledWith(message));
 		expect(screen.getByText('校對').closest('button')).not.toBeDisabled();
 	});
+
+	describe('keyboard and lifecycle', () => {
+		it('Escape closes the dialog and cancels a running stream', async () => {
+			const onCancelStream = vi.fn();
+			const { rerender } = render(AIDialog, { props: streamProps({ onCancelStream }) });
+			await fireEvent.click(screen.getByText('摘要'));
+			await rerender(streamProps({ onCancelStream, streaming: true }));
+
+			await fireEvent.keyDown(window, { key: 'Escape' });
+
+			expect(onCancelStream).toHaveBeenCalledTimes(1);
+			expect(screen.queryByText('AI 寫作助手')).toBeNull();
+		});
+
+		it('ignores other keys', async () => {
+			render(AIDialog, { props: streamProps() });
+
+			await fireEvent.keyDown(window, { key: 'Enter' });
+
+			expect(screen.getByText('AI 寫作助手')).toBeInTheDocument();
+		});
+
+		it('Escape while closed does not cancel a stream owned by another dialog', async () => {
+			// 文件問答與寫作助手共用父層的串流狀態
+			const onCancelStream = vi.fn();
+			render(AIDialog, { props: streamProps({ isOpen: false, streaming: true, onCancelStream }) });
+
+			await fireEvent.keyDown(window, { key: 'Escape' });
+
+			expect(onCancelStream).not.toHaveBeenCalled();
+		});
+
+		it('shows a loading state while proofreading', async () => {
+			vi.mocked(proofreadWithAI).mockReturnValue(new Promise(() => {}));
+			render(AIDialog, { props: streamProps() });
+
+			await fireEvent.click(screen.getByText('校對'));
+
+			expect(screen.getByText('AI 處理中...')).toBeInTheDocument();
+			for (const label of ['摘要', '潤稿', '校對']) {
+				expect(screen.getByText(label).closest('button')).toBeDisabled();
+			}
+		});
+
+		it('closing during proofreading resets the loading state', async () => {
+			vi.mocked(proofreadWithAI).mockReturnValue(new Promise(() => {}));
+			const { rerender } = render(AIDialog, { props: streamProps() });
+			await fireEvent.click(screen.getByText('校對'));
+
+			await fireEvent.click(screen.getByLabelText('Close dialog'));
+			await rerender(streamProps());
+
+			expect(screen.queryByText('AI 處理中...')).toBeNull();
+			expect(screen.getByText('校對').closest('button')).not.toBeDisabled();
+		});
+
+		it('closes after applying proofread changes', async () => {
+			const onApply = vi.fn();
+			vi.mocked(proofreadWithAI).mockResolvedValue(
+				proofreadResult([{ original: '錯', suggestion: '對', reason: 'r', severity: 'error' }])
+			);
+			render(AIDialog, { props: streamProps({ selectedText: '錯字', onApply }) });
+			await fireEvent.click(screen.getByText('校對'));
+			await fireEvent.click(await screen.findByText('套用'));
+
+			await fireEvent.click(screen.getByText('套用變更到文件'));
+
+			expect(onApply).toHaveBeenCalledWith('對字');
+			expect(screen.queryByText('AI 寫作助手')).toBeNull();
+		});
+
+		it('applies an issue only once even if clicked again', async () => {
+			const onApply = vi.fn();
+			// 建議文字仍包含原文：若允許重複套用會再替換一次
+			vi.mocked(proofreadWithAI).mockResolvedValue(
+				proofreadResult([{ original: '錯', suggestion: '對錯', reason: 'r', severity: 'info' }])
+			);
+			render(AIDialog, { props: streamProps({ selectedText: '錯字', onApply }) });
+			await fireEvent.click(screen.getByText('校對'));
+			const apply = await screen.findByText('套用');
+
+			await fireEvent.click(apply);
+			await fireEvent.click(apply);
+			await fireEvent.click(screen.getByText('套用變更到文件'));
+
+			expect(onApply).toHaveBeenCalledWith('對錯字');
+		});
+
+		it.each([['摘要'], ['潤稿'], ['校對']])(
+			'%s refuses to run without a selection even if triggered',
+			async (label) => {
+				const onStream = vi.fn(() => true);
+				render(AIDialog, { props: streamProps({ selectedText: '   ', onStream }) });
+
+				await fireEvent.click(screen.getByText(label));
+
+				expect(toastWarning).toHaveBeenCalledWith('Please select text first');
+				expect(onStream).not.toHaveBeenCalled();
+				expect(proofreadWithAI).not.toHaveBeenCalled();
+			}
+		);
+	});
 });

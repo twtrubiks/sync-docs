@@ -414,4 +414,441 @@ describe('CommentPanel', () => {
 			expect(screen.getByText('1 則回覆')).toBeInTheDocument();
 		});
 	});
+
+	describe('closing', () => {
+		it.each([
+			['the close button', () => fireEvent.click(screen.getByLabelText('關閉'))],
+			['the backdrop', () => fireEvent.click(screen.getByLabelText('關閉評論面板'))],
+			[
+				'Escape on the backdrop',
+				() => fireEvent.keyDown(screen.getByLabelText('關閉評論面板'), { key: 'Escape' })
+			]
+		])('closes with %s', async (_label, close) => {
+			await renderPanel();
+
+			await close();
+
+			expect(screen.queryByRole('heading', { name: /評論/ })).toBeNull();
+		});
+
+		it('ignores other keys on the backdrop', async () => {
+			await renderPanel();
+
+			await fireEvent.keyDown(screen.getByLabelText('關閉評論面板'), { key: 'Enter' });
+
+			expect(screen.getByRole('heading', { name: /評論/ })).toBeInTheDocument();
+		});
+	});
+
+	describe('in-flight requests', () => {
+		function deferred<T>() {
+			let resolve!: (value: T) => void;
+			let reject!: (reason: unknown) => void;
+			const promise = new Promise<T>((res, rej) => {
+				resolve = res;
+				reject = rej;
+			});
+			return { promise, resolve, reject };
+		}
+
+		it('disables load more while loading and re-enables it for the next page', async () => {
+			const next = deferred<ReturnType<typeof page>>();
+			vi.mocked(getComments)
+				.mockResolvedValueOnce(page([makeComment()], { page: 1, total_pages: 3, total: 3 }))
+				.mockReturnValueOnce(next.promise);
+			await renderPanel();
+
+			await fireEvent.click(screen.getByText('載入更多評論'));
+			const button = screen.getByText('載入中...').closest('button')!;
+			expect(button).toBeDisabled();
+			await fireEvent.click(button); // 載入中再點一次不應重複請求同一頁
+			expect(getComments).toHaveBeenCalledTimes(2);
+
+			next.resolve(
+				page([makeComment({ id: 'c2', content: 'Older' })], { page: 2, total_pages: 3, total: 3 })
+			);
+			await screen.findByText('Older');
+			expect(screen.getByText('載入更多評論').closest('button')).not.toBeDisabled();
+		});
+
+		it('reports load more failures and lets the user retry', async () => {
+			vi.mocked(getComments)
+				.mockResolvedValueOnce(page([makeComment()], { page: 1, total_pages: 2, total: 2 }))
+				.mockRejectedValueOnce(new Error('boom'));
+			await renderPanel();
+
+			await fireEvent.click(screen.getByText('載入更多評論'));
+
+			await waitFor(() => expect(toastError).toHaveBeenCalledWith('載入更多評論失敗'));
+			expect(screen.getByText('載入更多評論').closest('button')).not.toBeDisabled();
+		});
+
+		it('disables sending while a comment is being posted', async () => {
+			const created = deferred<Comment>();
+			vi.mocked(createComment).mockReturnValue(created.promise);
+			await renderPanel();
+			await fireEvent.input(screen.getByPlaceholderText('輸入評論...'), {
+				target: { value: 'Hello' }
+			});
+
+			await fireEvent.click(screen.getByText('發送評論'));
+
+			const sending = screen.getByText('發送中...').closest('button')!;
+			expect(sending).toBeDisabled();
+			await fireEvent.click(sending);
+			expect(createComment).toHaveBeenCalledTimes(1);
+			created.resolve(makeComment({ id: 'new', content: 'Hello' }));
+			await waitFor(() => expect(screen.getByText('發送評論')).toBeInTheDocument());
+		});
+
+		it('re-enables sending after a failed post', async () => {
+			vi.mocked(createComment).mockRejectedValue(new Error('nope'));
+			await renderPanel();
+			await fireEvent.input(screen.getByPlaceholderText('輸入評論...'), {
+				target: { value: 'Draft' }
+			});
+
+			await fireEvent.click(screen.getByText('發送評論'));
+
+			await waitFor(() => expect(toastError).toHaveBeenCalledWith('發送評論失敗'));
+			expect(screen.getByText('發送評論').closest('button')).not.toBeDisabled();
+		});
+	});
+
+	describe('rendering details', () => {
+		it('formats timestamps in zh-TW', async () => {
+			await renderPanel();
+
+			const expected = new Date('2026-03-01T10:00:00Z').toLocaleString('zh-TW', {
+				month: 'short',
+				day: 'numeric',
+				hour: '2-digit',
+				minute: '2-digit'
+			});
+			expect(screen.getByText(expected)).toBeInTheDocument();
+		});
+
+		it('lets read-only authors still edit their own comments', async () => {
+			vi.mocked(getComments).mockResolvedValue(
+				page([makeComment({ is_author: true, can_delete: false })])
+			);
+
+			await renderPanel({ canWrite: false });
+
+			expect(screen.getByText('編輯')).toBeInTheDocument();
+			expect(screen.queryByText('回覆')).toBeNull();
+		});
+
+		it('does not offer to expand comments without replies', async () => {
+			await renderPanel();
+
+			expect(screen.queryByText(/則回覆/)).toBeNull();
+		});
+	});
+
+	describe('editing state', () => {
+		it('starting a reply cancels an edit in progress, and vice versa', async () => {
+			vi.mocked(getComments).mockResolvedValue(
+				page([makeComment(), makeComment({ id: 'c2', content: 'Second', is_author: false })])
+			);
+			await renderPanel();
+
+			// 編輯中的評論不顯示操作按鈕，因此在另一則評論上開始回覆
+			await fireEvent.click(screen.getByText('編輯'));
+			await fireEvent.click(screen.getByText('回覆'));
+			expect(screen.queryByText('儲存')).toBeNull();
+			expect(screen.getByPlaceholderText('輸入回覆...')).toBeInTheDocument();
+
+			await fireEvent.click(screen.getByText('編輯'));
+			expect(screen.queryByPlaceholderText('輸入回覆...')).toBeNull();
+			expect(screen.getByText('儲存')).toBeInTheDocument();
+		});
+
+		it('starts every reply with an empty draft', async () => {
+			await renderPanel();
+
+			await fireEvent.click(screen.getByText('回覆'));
+			await fireEvent.input(screen.getByPlaceholderText('輸入回覆...'), {
+				target: { value: 'draft' }
+			});
+			await fireEvent.click(screen.getByText('取消'));
+			await fireEvent.click(screen.getByText('回覆'));
+
+			expect((screen.getByPlaceholderText('輸入回覆...') as HTMLTextAreaElement).value).toBe('');
+			expect(screen.getByText('發送').closest('button')).toBeDisabled();
+		});
+
+		it('updates only the edited comment', async () => {
+			vi.mocked(getComments).mockResolvedValue(
+				page([makeComment(), makeComment({ id: 'c2', content: 'Second', is_author: false })])
+			);
+			vi.mocked(updateComment).mockResolvedValue(makeComment({ content: 'Edited' }));
+			await renderPanel();
+
+			await fireEvent.click(screen.getByText('編輯'));
+			await fireEvent.input(screen.getByDisplayValue('First comment'), {
+				target: { value: 'Edited' }
+			});
+			await fireEvent.click(screen.getByText('儲存'));
+
+			await screen.findByText('Edited');
+			expect(screen.getByText('Second')).toBeInTheDocument();
+		});
+
+		it('reports failed edits and keeps the editor open', async () => {
+			vi.mocked(updateComment).mockRejectedValue(new Error('nope'));
+			await renderPanel();
+
+			await fireEvent.click(screen.getByText('編輯'));
+			await fireEvent.click(screen.getByText('儲存'));
+
+			await waitFor(() => expect(toastError).toHaveBeenCalledWith('更新評論失敗'));
+			expect(screen.getByText('儲存')).toBeInTheDocument();
+		});
+	});
+
+	describe('deleting details', () => {
+		it('keeps the comment when the confirmation is cancelled', async () => {
+			await renderPanel();
+
+			await fireEvent.click(screen.getByText('刪除'));
+			await fireEvent.click(within(screen.getByRole('alertdialog')).getByText('取消'));
+
+			expect(deleteComment).not.toHaveBeenCalled();
+			expect(screen.getByText('First comment')).toBeInTheDocument();
+		});
+
+		it('removes only the deleted comment', async () => {
+			vi.mocked(getComments).mockResolvedValue(
+				page([makeComment(), makeComment({ id: 'c2', content: 'Second' })])
+			);
+			vi.mocked(deleteComment).mockResolvedValue({ success: true, message: 'ok' });
+			await renderPanel();
+
+			await fireEvent.click(screen.getAllByText('刪除')[1]);
+			await fireEvent.click(within(screen.getByRole('alertdialog')).getByText('刪除'));
+
+			await waitFor(() => expect(screen.queryByText('Second')).toBeNull());
+			expect(screen.getByText('First comment')).toBeInTheDocument();
+			expect(deleteComment).toHaveBeenCalledWith('doc-1', 'c2');
+		});
+
+		it('reports failed deletions and keeps the comment', async () => {
+			vi.mocked(deleteComment).mockRejectedValue(new Error('nope'));
+			await renderPanel();
+
+			await fireEvent.click(screen.getByText('刪除'));
+			await fireEvent.click(within(screen.getByRole('alertdialog')).getByText('刪除'));
+
+			await waitFor(() => expect(toastError).toHaveBeenCalledWith('刪除評論失敗'));
+			expect(screen.getByText('First comment')).toBeInTheDocument();
+		});
+
+		it('deletes a reply from its thread and decrements the parent count', async () => {
+			vi.mocked(getComments).mockResolvedValue(page([makeComment({ reply_count: 2 })]));
+			vi.mocked(getReplies).mockResolvedValue([
+				makeComment({ id: 'r1', content: 'Reply one', parent_id: 'c1' }),
+				makeComment({ id: 'r2', content: 'Reply two', parent_id: 'c1', can_delete: false })
+			]);
+			vi.mocked(deleteComment).mockResolvedValue({ success: true, message: 'ok' });
+			await renderPanel();
+			await fireEvent.click(screen.getByText('2 則回覆'));
+			await screen.findByText('Reply one');
+
+			await fireEvent.click(screen.getByLabelText('刪除回覆'));
+			await fireEvent.click(within(screen.getByRole('alertdialog')).getByText('刪除'));
+
+			await waitFor(() => expect(screen.queryByText('Reply one')).toBeNull());
+			expect(deleteComment).toHaveBeenCalledWith('doc-1', 'r1');
+			expect(screen.getByText('Reply two')).toBeInTheDocument();
+			expect(screen.getByText('1 則回覆')).toBeInTheDocument();
+			// 刪除回覆不影響頂層評論總數
+			expect(screen.getByRole('heading', { name: '評論 (1)' })).toBeInTheDocument();
+		});
+	});
+
+	describe('reply details', () => {
+		const wsReply = {
+			id: 'r2',
+			content: 'Live reply',
+			author_username: 'bob',
+			author_id: '2',
+			created_at: '2026-03-02T10:00:00Z',
+			updated_at: '2026-03-02T10:00:00Z',
+			parent_id: 'c1',
+			reply_count: 0
+		};
+
+		beforeEach(() => {
+			vi.mocked(getComments).mockResolvedValue(page([makeComment({ reply_count: 1 })]));
+			vi.mocked(getReplies).mockResolvedValue([
+				makeComment({ id: 'r1', content: 'A reply', parent_id: 'c1' })
+			]);
+		});
+
+		async function expandReplies() {
+			await fireEvent.click(screen.getByText('1 則回覆'));
+			await screen.findByText('A reply');
+		}
+
+		it('shows a spinner while replies load and reports failures', async () => {
+			let rejectReplies!: (reason: unknown) => void;
+			vi.mocked(getReplies).mockReturnValue(
+				new Promise((_resolve, reject) => {
+					rejectReplies = reject;
+				})
+			);
+			await renderPanel();
+			const toggle = screen.getByText('1 則回覆').closest('button')!;
+
+			await fireEvent.click(toggle);
+			expect(toggle.querySelector('.animate-spin')).not.toBeNull();
+
+			rejectReplies(new Error('boom'));
+			await waitFor(() => expect(toastError).toHaveBeenCalledWith('載入回覆失敗'));
+			await waitFor(() => expect(toggle.querySelector('.animate-spin')).toBeNull());
+		});
+
+		it('adds live replies to an expanded thread once', async () => {
+			const { component } = await renderPanel();
+			await expandReplies();
+
+			component.addCommentFromWS(wsReply);
+			component.addCommentFromWS(wsReply);
+
+			await screen.findByText('Live reply');
+			expect(screen.getAllByText('Live reply')).toHaveLength(1);
+		});
+
+		it('does not duplicate a reply the broadcast already added', async () => {
+			vi.mocked(createComment).mockResolvedValue(makeComment({ ...wsReply, is_author: true }));
+			const { component } = await renderPanel();
+			await expandReplies();
+
+			component.addCommentFromWS({ ...wsReply, author_id: '1' });
+			await fireEvent.click(screen.getByText('回覆'));
+			await fireEvent.input(screen.getByPlaceholderText('輸入回覆...'), {
+				target: { value: 'Live reply' }
+			});
+			await fireEvent.click(screen.getByText('發送'));
+
+			await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('回覆已發送'));
+			expect(screen.getAllByText('Live reply')).toHaveLength(1);
+		});
+
+		it('replies to a collapsed thread without expanding it', async () => {
+			vi.mocked(createComment).mockResolvedValue(makeComment({ ...wsReply }));
+			await renderPanel();
+
+			await fireEvent.click(screen.getByText('回覆'));
+			await fireEvent.input(screen.getByPlaceholderText('輸入回覆...'), {
+				target: { value: 'Live reply' }
+			});
+			await fireEvent.click(screen.getByText('發送'));
+
+			await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('回覆已發送'));
+			expect(toastError).not.toHaveBeenCalled();
+			expect(screen.queryByText('Live reply')).toBeNull();
+		});
+
+		it('reports failed replies and re-enables sending', async () => {
+			vi.mocked(createComment).mockRejectedValue(new Error('nope'));
+			await renderPanel();
+
+			await fireEvent.click(screen.getByText('回覆'));
+			await fireEvent.input(screen.getByPlaceholderText('輸入回覆...'), {
+				target: { value: 'Live reply' }
+			});
+			await fireEvent.click(screen.getByText('發送'));
+
+			await waitFor(() => expect(toastError).toHaveBeenCalledWith('發送回覆失敗'));
+			expect(screen.getByText('發送').closest('button')).not.toBeDisabled();
+			expect((screen.getByPlaceholderText('輸入回覆...') as HTMLTextAreaElement).value).toBe(
+				'Live reply'
+			);
+		});
+
+		it('disables the reply button while sending', async () => {
+			vi.mocked(createComment).mockReturnValue(new Promise(() => {}));
+			await renderPanel();
+
+			await fireEvent.click(screen.getByText('回覆'));
+			await fireEvent.input(screen.getByPlaceholderText('輸入回覆...'), {
+				target: { value: 'Live reply' }
+			});
+			await fireEvent.click(screen.getByText('發送'));
+
+			const send = screen.getByText('發送').closest('button')!;
+			expect(send).toBeDisabled();
+			await fireEvent.click(send);
+			expect(createComment).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('WebSocket details', () => {
+		const base = {
+			author_username: 'me',
+			created_at: '2026-03-02T10:00:00Z',
+			updated_at: '2026-03-02T10:00:00Z',
+			reply_count: 0
+		};
+
+		it('marks broadcasts from the current user as their own', async () => {
+			vi.mocked(getComments).mockResolvedValue(page([]));
+			const { component } = await renderPanel();
+
+			component.addCommentFromWS({
+				...base,
+				id: 'mine',
+				content: 'Mine',
+				author_id: '1',
+				parent_id: null
+			});
+
+			await screen.findByText('Mine');
+			expect(screen.getByText('編輯')).toBeInTheDocument();
+			expect(screen.getByText('刪除')).toBeInTheDocument();
+		});
+
+		it('counts a reply broadcast only on its parent', async () => {
+			vi.mocked(getComments).mockResolvedValue(
+				page([makeComment(), makeComment({ id: 'c2', content: 'Second' })])
+			);
+			const { component } = await renderPanel();
+
+			component.addCommentFromWS({
+				...base,
+				id: 'r1',
+				content: 'reply',
+				author_id: '2',
+				parent_id: 'c2'
+			});
+
+			expect(await screen.findAllByText('1 則回覆')).toHaveLength(1);
+		});
+
+		it('applies updates and removals only to the targeted comment', async () => {
+			vi.mocked(getComments).mockResolvedValue(
+				page([makeComment(), makeComment({ id: 'c2', content: 'Second' })])
+			);
+			const { component } = await renderPanel();
+
+			component.updateCommentFromWS('c2', 'Changed', '2026-03-03T10:00:00Z');
+			await screen.findByText('Changed');
+			expect(screen.getByText('First comment')).toBeInTheDocument();
+
+			component.removeCommentFromWS('c2', null);
+			await waitFor(() => expect(screen.queryByText('Changed')).toBeNull());
+			expect(screen.getByText('First comment')).toBeInTheDocument();
+		});
+
+		it('decrements the reply count of a collapsed thread', async () => {
+			vi.mocked(getComments).mockResolvedValue(page([makeComment({ reply_count: 2 })]));
+			const { component } = await renderPanel();
+
+			component.removeCommentFromWS('r1', 'c1');
+
+			expect(await screen.findByText('1 則回覆')).toBeInTheDocument();
+		});
+	});
 });

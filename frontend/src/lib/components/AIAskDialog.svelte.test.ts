@@ -15,6 +15,8 @@ vi.mock('$app/environment', () => ({
 	browser: true
 }));
 
+import { toastWarning } from '$lib/toast';
+
 describe('AIAskDialog', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -152,5 +154,54 @@ describe('AIAskDialog', () => {
 
 		expect(onCancelStream).not.toHaveBeenCalled();
 		expect(screen.queryByText('文件問答')).toBeNull();
+	});
+
+	describe('keyboard and lifecycle', () => {
+		it('warns instead of asking a whitespace-only question', async () => {
+			const onAsk = vi.fn(() => true);
+			render(AIAskDialog, { props: { isOpen: true, documentText: '文件', onAsk } });
+			await fireEvent.input(screen.getByPlaceholderText('例如：這份文件的重點是什麼？'), {
+				target: { value: '   ' }
+			});
+
+			await fireEvent.click(screen.getByText('送出'));
+
+			expect(toastWarning).toHaveBeenCalledWith('請先輸入問題');
+			expect(onAsk).not.toHaveBeenCalled();
+		});
+
+		it('ignores keys other than Escape', async () => {
+			render(AIAskDialog, { props: { isOpen: true, documentText: '文件' } });
+
+			await fireEvent.keyDown(window, { key: 'Enter' });
+
+			expect(screen.getByText('文件問答')).toBeInTheDocument();
+		});
+
+		it('Escape while closed does not cancel a stream owned by another dialog', async () => {
+			// 寫作助手與文件問答共用父層的串流狀態
+			const onCancelStream = vi.fn();
+			render(AIAskDialog, {
+				props: { isOpen: false, documentText: '文件', streaming: true, onCancelStream }
+			});
+
+			await fireEvent.keyDown(window, { key: 'Escape' });
+
+			expect(onCancelStream).not.toHaveBeenCalled();
+		});
+
+		it('starts with an empty question after being closed', async () => {
+			const { rerender } = render(AIAskDialog, { props: { isOpen: true, documentText: '文件' } });
+			await fireEvent.input(screen.getByPlaceholderText('例如：這份文件的重點是什麼？'), {
+				target: { value: '舊問題' }
+			});
+
+			await fireEvent.click(screen.getByLabelText('Close dialog'));
+			await rerender({ isOpen: true, documentText: '文件' });
+
+			expect(
+				(screen.getByPlaceholderText('例如：這份文件的重點是什麼？') as HTMLTextAreaElement).value
+			).toBe('');
+		});
 	});
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import AIMetadataDialog from './AIMetadataDialog.svelte';
 
 // Mock AI API
@@ -130,5 +130,69 @@ describe('AIMetadataDialog', () => {
 		render(AIMetadataDialog, { props: { isOpen: true, documentText: '內容' } });
 
 		await waitFor(() => expect(toastError).toHaveBeenCalledWith('AI 文件分析失敗'));
+	});
+
+	describe('errors and closing', () => {
+		const ok = {
+			success: true,
+			result: { summary: '摘要', tags: [], language: 'zh-Hant', reading_time: 1 }
+		};
+
+		it.each([
+			[
+				Object.assign(new Error('aborted'), { name: 'AbortError' }),
+				'Request timed out, please try again'
+			],
+			[new Error('network'), 'AI processing request failed'],
+			['not an error', 'AI processing request failed']
+		])('reports thrown errors (%s)', async (error, message) => {
+			vi.mocked(metadataWithAI).mockRejectedValue(error);
+
+			render(AIMetadataDialog, { props: { isOpen: true, documentText: '內容' } });
+
+			await waitFor(() => expect(toastError).toHaveBeenCalledWith(message));
+			expect(screen.queryByText(/分析中/)).toBeNull();
+		});
+
+		it.each([
+			['the close button', () => fireEvent.click(screen.getByLabelText('Close dialog'))],
+			['the backdrop', () => fireEvent.click(screen.getByLabelText('關閉對話框'))],
+			['Escape', () => fireEvent.keyDown(window, { key: 'Escape' })]
+		])('closes with %s and re-analyzes when reopened', async (_label, close) => {
+			vi.mocked(metadataWithAI).mockResolvedValue(ok);
+			const { rerender } = render(AIMetadataDialog, {
+				props: { isOpen: true, documentText: '內容' }
+			});
+			await waitFor(() => expect(metadataWithAI).toHaveBeenCalledTimes(1));
+
+			await close();
+			expect(screen.queryByText('文件分析')).toBeNull();
+
+			await rerender({ isOpen: true, documentText: '內容' });
+			await waitFor(() => expect(metadataWithAI).toHaveBeenCalledTimes(2));
+		});
+
+		it('ignores keys other than Escape', async () => {
+			vi.mocked(metadataWithAI).mockResolvedValue(ok);
+			render(AIMetadataDialog, { props: { isOpen: true, documentText: '內容' } });
+
+			await fireEvent.keyDown(window, { key: 'Enter' });
+
+			expect(screen.getByText('文件分析')).toBeInTheDocument();
+		});
+
+		it('Escape while closed keeps the cached analysis', async () => {
+			vi.mocked(metadataWithAI).mockResolvedValue(ok);
+			const { rerender } = render(AIMetadataDialog, {
+				props: { isOpen: true, documentText: '內容' }
+			});
+			await waitFor(() => expect(metadataWithAI).toHaveBeenCalledTimes(1));
+			await rerender({ isOpen: false, documentText: '內容' });
+
+			await fireEvent.keyDown(window, { key: 'Escape' });
+			await rerender({ isOpen: true, documentText: '內容' });
+
+			expect(metadataWithAI).toHaveBeenCalledTimes(1);
+		});
 	});
 });
