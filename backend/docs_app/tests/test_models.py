@@ -7,7 +7,7 @@ import time
 
 import pytest
 from django.contrib.auth.models import User
-from docs_app.models import Document, DocumentCollaborator, PermissionLevel
+from docs_app.models import Comment, Document, DocumentCollaborator, PermissionLevel
 
 pytestmark = pytest.mark.django_db
 
@@ -317,3 +317,14 @@ class TestDocumentModel:
     def test_can_user_write_non_collaborator(self, test_document, another_user):
         """測試非協作者不能編輯文檔"""
         assert test_document.can_user_write(another_user) is False
+
+
+@pytest.mark.django_db
+def test_collaborator_and_comment_str(test_document, another_user):
+    collab = DocumentCollaborator.objects.create(
+        document=test_document, user=another_user, permission=PermissionLevel.READ
+    )
+    comment = Comment.objects.create(document=test_document, author=another_user, content="hi")
+
+    assert str(collab) == f"anotheruser - {test_document.title} (read)"
+    assert str(comment) == f"Comment by anotheruser on {test_document.title}"

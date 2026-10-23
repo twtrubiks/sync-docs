@@ -402,6 +402,52 @@ class TestConnectionManagerUnit:
             await manager.remove_connection(1, "channel_1")
             mock_redis_instance.hdel.assert_called_once()
 
+    async def test_add_connection_fails_closed_on_redis_error(self):
+        """Redis 出錯時拒絕連線（fail-closed），避免連線追蹤失準後無法限制"""
+        manager = ConnectionManager()
+        broken = AsyncMock()
+        broken.eval.side_effect = Exception('redis down')
+
+        with patch.object(manager, 'get_redis', new_callable=AsyncMock, return_value=broken):
+            assert await manager.add_connection(1, "channel_1") is False
+
+    async def test_remove_connection_retries_with_backoff(self):
+        """移除失敗時以 0.1s、0.2s 退避重試，第 3 次成功即停止"""
+        manager = ConnectionManager()
+        flaky = AsyncMock()
+        flaky.hdel.side_effect = [Exception('e1'), Exception('e2'), 1]
+        flaky.hlen.return_value = 0
+
+        with patch.object(manager, 'get_redis', new_callable=AsyncMock, return_value=flaky), \
+                patch('docs_app.connection_manager.asyncio.sleep', new_callable=AsyncMock) as sleep:
+            await manager.remove_connection(1, "channel_1")
+
+        assert flaky.hdel.await_count == 3
+        assert [c.args[0] for c in sleep.await_args_list] == [pytest.approx(0.1), pytest.approx(0.2)]
+
+    async def test_remove_connection_gives_up_after_max_retries(self):
+        manager = ConnectionManager()
+        broken = AsyncMock()
+        broken.hdel.side_effect = Exception('redis down')
+
+        with patch.object(manager, 'get_redis', new_callable=AsyncMock, return_value=broken), \
+                patch('docs_app.connection_manager.asyncio.sleep', new_callable=AsyncMock) as sleep:
+            await manager.remove_connection(1, "channel_1")
+
+        assert broken.hdel.await_count == ConnectionManager.REMOVE_MAX_RETRIES == 3
+        assert sleep.await_count == 2  # 最後一次失敗後不再等待
+
+    async def test_get_connection_count(self):
+        manager = ConnectionManager()
+        client = AsyncMock()
+        client.hlen.return_value = 4
+
+        with patch.object(manager, 'get_redis', new_callable=AsyncMock, return_value=client):
+            assert await manager.get_connection_count(1) == 4
+        client.hlen.side_effect = Exception('redis down')
+        with patch.object(manager, 'get_redis', new_callable=AsyncMock, return_value=client):
+            assert await manager.get_connection_count(1) == 0
+
 
 class TestConnectionManagerFieldTTL:
     """

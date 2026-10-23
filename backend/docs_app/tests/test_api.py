@@ -1055,3 +1055,24 @@ def test_update_document_keeps_at_most_50_versions(owner_doc_with_collaborators)
     numbers = list(DocumentVersion.objects.filter(document=document).values_list("version_number", flat=True))
     assert len(numbers) == 50
     assert min(numbers) == 2 and max(numbers) == 51
+
+
+@pytest.mark.parametrize("method, path", [
+    ("post", "collaborators/"),
+    ("put", "collaborators/{reader_id}/"),
+], ids=["share", "update-permission"])
+def test_invalid_permission_value_rejected(owner_doc_with_collaborators, method, path):
+    """權限只能是 read / write，其他值（如 admin）一律 422 且不寫入"""
+    ctx = owner_doc_with_collaborators
+    url = f"{DOCUMENTS_ENDPOINT}{ctx['document'].id}/" + path.format(reader_id=ctx["reader"].id)
+
+    response = getattr(ctx["client"], method)(
+        url,
+        data=json.dumps({"username": "docreader", "permission": "admin"}),
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {ctx['owner_token']}",
+    )
+
+    assert response.status_code == 422
+    assert "Permission must be one of: ['read', 'write']" in response.content.decode()
+    assert DocumentCollaborator.objects.get(document=ctx["document"], user=ctx["reader"]).permission == "read"

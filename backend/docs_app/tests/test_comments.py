@@ -169,6 +169,14 @@ class TestCommentSchemas:
         schema = CommentUpdateSchema(content="Updated content")
         assert schema.content == "Updated content"
 
+    def test_comment_update_schema_too_long_rejected(self):
+        with pytest.raises(ValidationError, match="評論內容不能超過 5000 字元"):
+            CommentUpdateSchema(content="x" * 5001)
+
+    def test_comment_schemas_accept_exactly_5000_chars(self):
+        assert len(CommentCreateSchema(content="x" * 5000).content) == 5000
+        assert len(CommentUpdateSchema(content="x" * 5000).content) == 5000
+
     def test_comment_update_schema_empty_rejected(self):
         """測試空內容更新被拒絕"""
         with pytest.raises(ValidationError):
@@ -710,3 +718,14 @@ class TestCommentAPIContracts:
                                   data={"content": "x"}, content_type="application/json",
                                   HTTP_AUTHORIZATION=f"Bearer {r_token}")
         assert (read_only.status_code, read_only.json()["detail"]) == (403, "沒有編輯權限")
+
+
+@pytest.mark.django_db
+def test_non_collaborator_cannot_read_comments(another_user, test_document):
+    """評論 API 對無權限者回 404（不洩漏文件存在與否）"""
+    client = Client()
+    response = client.get(
+        f"/api/documents/{test_document.id}/comments/",
+        HTTP_AUTHORIZATION=f"Bearer {AccessToken.for_user(another_user)}",
+    )
+    assert response.status_code == 404

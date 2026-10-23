@@ -372,6 +372,15 @@ class TestAIServiceErrorHandling:
                 await _call_service(method)
         assert str(excinfo.value) == expected
 
+    @pytest.mark.parametrize('method', ['process_stream', 'ask_stream'])
+    @pytest.mark.parametrize('exc', [ValueError('bad output'), RuntimeError('model gave up')])
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_stream_value_and_runtime_errors_propagate_unchanged(self, method, exc):
+        with AGENT_GETTERS[method]().override(model=_raising_model(exc)):
+            with pytest.raises(type(exc)) as excinfo:
+                await _call_service(method)
+        assert excinfo.value is exc
+
     @override_settings(AI_PROVIDER='gemini', GOOGLE_API_KEY='', NVIDIA_API_KEY='nv-key')
     async def test_gemini_requires_google_key(self):
         """供應商為 gemini 時檢查的是 GOOGLE_API_KEY，而非 NVIDIA_API_KEY"""
@@ -633,3 +642,17 @@ class TestAIRateLimiterSlidingWindow:
         sentinel = object()
         with patch('docs_app.ai_rate_limiter.get_sync_redis', return_value=sentinel):
             assert AIRateLimiter()._get_redis() is sentinel
+
+
+
+def test_sync_redis_client_is_cached_and_decodes_responses():
+    from docs_app import redis_pool
+
+    original = redis_pool._sync_redis
+    redis_pool._sync_redis = None
+    try:
+        first = redis_pool.get_sync_redis()
+        assert redis_pool.get_sync_redis() is first
+        assert first.connection_pool.connection_kwargs['decode_responses'] is True
+    finally:
+        redis_pool._sync_redis = original
