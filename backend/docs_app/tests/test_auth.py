@@ -509,3 +509,40 @@ def test_login_rate_limit_uses_ip_scoped_key(client, settings, monkeypatch, user
     tokens = login(client, user_data)
     assert "access" in tokens
     assert recorded_keys == ["login:127.0.0.1"]
+
+
+@pytest.mark.django_db
+def test_auth_rate_limits_use_scoped_keys_and_quotas(client, settings, monkeypatch, user_data):
+    """
+    登入：每 IP 5 分鐘 10 次；註冊：每 IP 1 小時 10 次（兩者分開計數）。
+    """
+    settings.AUTH_RATE_LIMIT_ENABLED = True
+    calls = []
+
+    def fake_is_allowed(key, max_requests, window_seconds):
+        calls.append((key, max_requests, window_seconds))
+        return True
+
+    monkeypatch.setattr("docs_app.throttling.ai_rate_limiter.is_allowed", fake_is_allowed)
+
+    register = client.post("/api/auth/register", data=json.dumps(user_data), content_type="application/json")
+    token = client.post("/api/token/pair", data=json.dumps(user_data), content_type="application/json")
+
+    assert (register.status_code, token.status_code) == (201, 200)
+    assert calls == [
+        ("register:127.0.0.1", 10, 3600),
+        ("login:127.0.0.1", 10, 300),
+    ]
+
+
+@pytest.mark.django_db
+def test_auth_rate_limit_disabled_skips_limiter(client, settings, monkeypatch, user_data):
+    settings.AUTH_RATE_LIMIT_ENABLED = False
+    monkeypatch.setattr(
+        "docs_app.throttling.ai_rate_limiter.is_allowed",
+        lambda *args: pytest.fail("限流關閉時不應呼叫限流器"),
+    )
+
+    response = client.post("/api/auth/register", data=json.dumps(user_data), content_type="application/json")
+
+    assert response.status_code == 201

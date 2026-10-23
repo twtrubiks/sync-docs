@@ -90,6 +90,8 @@ class TestPermissionChangedHandler:
         sent_data = json.loads(mock_consumer.send.call_args.kwargs['text_data'])
         assert sent_data['type'] == 'connection_error'
         assert sent_data['error_code'] == 'PERMISSION_DENIED'
+        # 前端在 onclose 時顯示這段訊息（close frame 不帶 reason）
+        assert sent_data['message'] == 'Your access to this document has been removed'
         mock_consumer.close.assert_called_once_with(code=WSCloseCodes.PERMISSION_DENIED)
 
     async def test_demote_updates_can_write_and_notifies(self, mock_consumer, test_user):
@@ -819,3 +821,133 @@ class TestDeltaLimitsAndBusyStream:
         messages = _sent(consumer)
         assert {'type': 'ai_stream_error', 'message': '已有 AI 串流進行中，請稍候'} in messages
         assert [m['type'] for m in messages].count('ai_stream_start') == 1
+
+
+class TestCursorHandling:
+
+    @pytest.fixture
+    def consumer(self, test_user, test_document):
+        return _make_consumer(test_user, test_document)
+
+    async def test_cursor_move_refreshes_presence_ttl(self, consumer):
+        """活躍編輯者的游標移動要續命自己的 presence，避免 5 分鐘後從在線列表消失"""
+        consumer.refresh_presence_ttl = AsyncMock()
+
+        await consumer.receive(text_data=json.dumps({'type': 'cursor_move', 'index': 3, 'length': 1}))
+
+        consumer.refresh_presence_ttl.assert_awaited_once()
+        consumer.channel_layer.group_send.assert_awaited_once()
+
+    async def test_cursor_update_forwards_to_others_only(self, consumer):
+        event = {
+            'type': 'cursor_update', 'user_id': '2', 'username': 'bob', 'color': '#FF6B6B',
+            'cursor': {'index': 3, 'length': 1}, 'timestamp': 1.5, 'sender_channel': 'other_channel',
+        }
+
+        await consumer.cursor_update(event)
+        await consumer.cursor_update({**event, 'sender_channel': 'test_channel'})
+
+        assert _sent(consumer) == [{
+            'type': 'cursor_move', 'user_id': '2', 'username': 'bob', 'color': '#FF6B6B',
+            'cursor': {'index': 3, 'length': 1}, 'timestamp': 1.5,
+        }]
+
+    async def test_cancel_without_running_stream_is_noop(self, consumer):
+        await consumer.receive(text_data=json.dumps({'type': 'ai_stream_cancel'}))
+
+        consumer.send.assert_not_called()
+
+
+class TestPresenceStorage:
+    """presence 寫入 / 續命 / 移除（真實 Redis；field 級 TTL）"""
+
+    @pytest.fixture
+    async def redis_client(self):
+        """自建獨立 client：redis_pool 的全域 client 會跨測試綁到已關閉的 event loop"""
+        import redis.asyncio as aioredis
+        from docs_app.redis_pool import _get_host_port
+
+        host, port = _get_host_port()
+        r = aioredis.Redis(host=host, port=port, decode_responses=True)
+        yield r
+        await r.aclose()
+
+    @pytest.fixture
+    async def consumer(self, test_user, test_document, redis_client):
+        consumer = _make_consumer(test_user, test_document)
+        key = f'presence:{test_document.id}'
+        await redis_client.delete(key)
+        with patch('docs_app.consumers.get_async_redis', AsyncMock(return_value=redis_client)):
+            yield consumer
+        await redis_client.delete(key)
+
+    async def test_add_list_and_remove_presence(self, consumer, redis_client, test_user, test_document):
+        key = f'presence:{test_document.id}'
+        field = str(test_user.id)
+
+        await consumer.add_user_to_presence()
+
+        stored = json.loads(await redis_client.hget(key, field))
+        assert stored == {
+            'user_id': field,
+            'username': test_user.username,
+            'color': DocConsumer.get_user_color(test_user.id),
+            'channel_name': 'test_channel',
+        }
+        [ttl] = await redis_client.httl(key, field)
+        assert 290 < ttl <= 300
+        assert await consumer.get_online_users() == [stored]
+
+        await consumer.remove_user_from_presence()
+
+        assert await redis_client.hget(key, field) is None
+        assert await consumer.get_online_users() == []
+
+    async def test_refresh_presence_ttl_renews_own_field(self, consumer, redis_client, test_user, test_document):
+        key = f'presence:{test_document.id}'
+        field = str(test_user.id)
+        await consumer.add_user_to_presence()
+        await redis_client.hexpire(key, 10, field)
+
+        await consumer.refresh_presence_ttl()
+
+        [ttl] = await redis_client.httl(key, field)
+        assert 290 < ttl <= 300
+
+
+class TestHeartbeat:
+
+    async def test_heartbeat_refreshes_connection_and_presence(self, test_user, test_document):
+        consumer = _make_consumer(test_user, test_document)
+        consumer.refresh_presence_ttl = AsyncMock()
+
+        with patch('docs_app.consumers.HEARTBEAT_INTERVAL', 0.01), \
+                patch('docs_app.consumers.connection_manager.refresh_connection',
+                      new_callable=AsyncMock) as refresh_connection:
+            task = asyncio.create_task(consumer._heartbeat_loop())
+            await asyncio.sleep(0.05)
+            task.cancel()
+            await task  # CancelledError 在 loop 內被吞掉，正常結束
+
+        refresh_connection.assert_awaited_with(test_user.id, 'test_channel')
+        assert consumer.refresh_presence_ttl.await_count >= 1
+
+    async def test_heartbeat_survives_refresh_errors(self, test_user, test_document):
+        """單次刷新失敗不應中斷心跳"""
+        consumer = _make_consumer(test_user, test_document)
+        consumer.refresh_presence_ttl = AsyncMock()
+        calls = []
+
+        async def flaky_refresh(user_id, channel_name):
+            calls.append(user_id)
+            if len(calls) == 1:
+                raise Exception('redis down')
+
+        with patch('docs_app.consumers.HEARTBEAT_INTERVAL', 0.01), \
+                patch('docs_app.consumers.connection_manager.refresh_connection', flaky_refresh):
+            task = asyncio.create_task(consumer._heartbeat_loop())
+            await asyncio.sleep(0.05)
+            task.cancel()
+            await task
+
+        assert len(calls) >= 2

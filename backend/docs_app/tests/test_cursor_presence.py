@@ -18,7 +18,7 @@ class TestCursorPresence:
     """游標與在線狀態測試"""
 
     async def test_cursor_move_broadcast(
-        self, websocket_application, shared_document,
+        self, websocket_application, shared_document, test_user,
         jwt_token_for_user, jwt_token_for_another_user
     ):
         """測試游標位置廣播給其他用戶"""
@@ -65,6 +65,8 @@ class TestCursorPresence:
         assert data['type'] == 'cursor_move'
         assert data['cursor']['index'] == 10
         assert data['cursor']['length'] == 5
+        assert data['user_id'] == str(test_user.id)
+        assert data['username'] == test_user.username
         assert 'timestamp' in data
         assert 'color' in data
 
@@ -203,6 +205,11 @@ class TestCursorPresence:
         assert sync2['type'] == 'presence_sync'
         # 第二個用戶連接時，應看到至少兩個用戶（自己和第一個）
         assert len(sync2['users']) >= 2
+        # 前端以 user_id / username / color 繪製在線頭像
+        by_name = {u['username']: u for u in sync2['users']}
+        assert {'testuser', 'anotheruser'} <= set(by_name)
+        for user in by_name.values():
+            assert user['user_id'] and user['color'].startswith('#')
 
         await comm1.disconnect()
         await comm2.disconnect()

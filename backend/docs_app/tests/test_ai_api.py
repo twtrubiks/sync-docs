@@ -5,6 +5,8 @@ AI API 測試
 AIService 行為測試以 TestModel / FunctionModel override agent，全程不打外部 API。
 """
 
+import asyncio
+
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from django.test import override_settings
@@ -61,21 +63,21 @@ class TestAIService:
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
     async def test_process_stream_empty_text_error(self):
         """串流：空文字錯誤（迭代時拋出）"""
-        with pytest.raises(ValueError, match="Text cannot be empty"):
+        with pytest.raises(ValueError, match=r"^Text cannot be empty$"):
             async for _ in AIService().process_stream('summarize', ''):
                 pass
 
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
     async def test_process_stream_invalid_action_error(self):
         """串流：無效操作錯誤"""
-        with pytest.raises(ValueError, match="Unknown action"):
+        with pytest.raises(ValueError, match=r"^Unknown action: invalid$"):
             async for _ in AIService().process_stream('invalid', '文字'):
                 pass
 
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='')
     async def test_process_stream_not_configured_error(self):
         """串流：API Key 未配置錯誤"""
-        with pytest.raises(RuntimeError, match="AI 服務未配置"):
+        with pytest.raises(RuntimeError, match=r"^AI 服務未配置$"):
             async for _ in AIService().process_stream('summarize', '文字'):
                 pass
 
@@ -109,7 +111,10 @@ class TestAIService:
     def test_gemini_builds_google_model(self):
         """gemini 供應商建立 GoogleModel（不打 API）"""
         from pydantic_ai.models.google import GoogleModel
-        assert isinstance(_get_model(), GoogleModel)
+        model = _get_model()
+        assert isinstance(model, GoogleModel)
+        # 關閉思考：思考 token 會吃掉 max_tokens 預算導致回覆被截斷
+        assert model.settings['google_thinking_config'] == {'thinking_budget': 0}
 
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='nv-key')
     def test_model_is_cached(self):
@@ -158,13 +163,13 @@ class TestProofread:
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
     async def test_empty_text_error(self):
         """測試空文字錯誤"""
-        with pytest.raises(ValueError, match="Text cannot be empty"):
+        with pytest.raises(ValueError, match=r"^Text cannot be empty$"):
             await AIService().proofread('')
 
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='')
     async def test_not_configured_error(self):
         """測試 API Key 未配置錯誤"""
-        with pytest.raises(RuntimeError, match="AI 服務未配置"):
+        with pytest.raises(RuntimeError, match=r"^AI 服務未配置$"):
             await AIService().proofread('文字')
 
 
@@ -201,13 +206,13 @@ class TestMetadata:
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
     async def test_empty_text_error(self):
         """測試空文字錯誤"""
-        with pytest.raises(ValueError, match="Text cannot be empty"):
+        with pytest.raises(ValueError, match=r"^Text cannot be empty$"):
             await AIService().generate_metadata('')
 
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='')
     async def test_not_configured_error(self):
         """測試 API Key 未配置錯誤"""
-        with pytest.raises(RuntimeError, match="AI 服務未配置"):
+        with pytest.raises(RuntimeError, match=r"^AI 服務未配置$"):
             await AIService().generate_metadata('文字')
 
 
@@ -227,14 +232,14 @@ class TestDocQA:
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
     async def test_ask_stream_empty_question_error(self):
         """串流：空問題錯誤（迭代時拋出）"""
-        with pytest.raises(ValueError, match="Question cannot be empty"):
+        with pytest.raises(ValueError, match=r"^Question cannot be empty$"):
             async for _ in AIService().ask_stream('', '文件內容'):
                 pass
 
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='')
     async def test_ask_stream_not_configured_error(self):
         """串流：API Key 未配置錯誤"""
-        with pytest.raises(RuntimeError, match="AI 服務未配置"):
+        with pytest.raises(RuntimeError, match=r"^AI 服務未配置$"):
             async for _ in AIService().ask_stream('問題', '文件內容'):
                 pass
 
@@ -392,8 +397,9 @@ class TestAIServiceErrorHandling:
 
         assert captured['prompt'] == 'A' * 5000 + '...'
 
+    @pytest.mark.parametrize('method', ['proofread', 'generate_metadata'])
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
-    async def test_structured_input_at_limit_not_truncated(self):
+    async def test_structured_input_at_limit_not_truncated(self, method):
         """剛好 5000 字元不截斷（邊界）"""
         captured = {}
 
@@ -404,11 +410,68 @@ class TestAIServiceErrorHandling:
                         captured['prompt'] = str(part.content)
             raise RuntimeError('stop after capture')
 
-        with _get_proofread_agent().override(model=FunctionModel(function=capture)):
+        with AGENT_GETTERS[method]().override(model=FunctionModel(function=capture)):
             with pytest.raises(RuntimeError):
-                await AIService().proofread('A' * 5000)
+                await getattr(AIService(), method)('A' * 5000)
 
         assert captured['prompt'] == 'A' * 5000
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_stream_inputs_at_limit_not_truncated(self):
+        """串流（摘要 / 問答）：剛好 5000 字元不加省略號"""
+        captured = {}
+
+        async def capture_prompt(messages, info):
+            for message in messages:
+                for part in message.parts:
+                    if isinstance(part, UserPromptPart):
+                        captured['prompt'] = str(part.content)
+            yield '結果'
+
+        async def capture_tool(messages, info):
+            for message in messages:
+                for part in message.parts:
+                    if isinstance(part, ToolReturnPart):
+                        captured['doc'] = str(part.content)
+                        yield '答'
+                        return
+            yield {0: DeltaToolCall(name='get_document_text', json_args='{}', tool_call_id='c1')}
+
+        with _get_agent().override(model=FunctionModel(stream_function=capture_prompt)):
+            [c async for c in AIService().process_stream('summarize', 'A' * 5000)]
+        with _get_doc_agent().override(model=FunctionModel(stream_function=capture_tool)):
+            [c async for c in AIService().ask_stream('問題', 'A' * 5000)]
+
+        assert 'A' * 5000 in captured['prompt'] and '...' not in captured['prompt']
+        assert captured['doc'] == 'A' * 5000
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_streams_yield_incremental_deltas(self):
+        """串流回傳的是增量 delta（前端逐段串接），不是累積全文"""
+        # 片段間隔需大於 pydantic-ai stream_text 的 debounce（0.1s），否則會被合併成一段
+        async def two_chunks(messages, info):
+            yield '你好'
+            await asyncio.sleep(0.15)
+            yield '世界'
+
+        async def tool_then_two_chunks(messages, info):
+            for message in messages:
+                for part in message.parts:
+                    if isinstance(part, ToolReturnPart):
+                        yield '你好'
+                        await asyncio.sleep(0.15)
+                        yield '世界'
+                        return
+            yield {0: DeltaToolCall(name='get_document_text', json_args='{}', tool_call_id='c1')}
+
+        with _get_agent().override(model=FunctionModel(stream_function=two_chunks)):
+            summary = [c async for c in AIService().process_stream('summarize', '文字')]
+        with _get_doc_agent().override(model=FunctionModel(stream_function=tool_then_two_chunks)):
+            answer = [c async for c in AIService().ask_stream('問題', '文件')]
+
+        # 若回傳累積全文（delta=False），串接後會變成「你好你好世界」
+        assert ''.join(summary) == '你好世界'
+        assert ''.join(answer) == '你好世界'
 
     @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
     async def test_ask_stream_document_truncated_to_5000_chars(self):
@@ -504,3 +567,69 @@ class TestAIController:
     def test_requires_authentication(self, client, url):
         response = client.post(url, data={'text': '文字'}, content_type='application/json')
         assert response.status_code == 401
+
+
+class TestAIRateLimiterSlidingWindow:
+    """AI / 登入 / 註冊共用的同步限流器實際行為（真實 Redis + 假時鐘）"""
+
+    KEY = 'ai:test-sliding-window'
+    OTHER_KEY = 'ai:test-sliding-window-other'
+
+    @pytest.fixture
+    def redis_client(self):
+        import redis
+        from docs_app.redis_pool import _get_host_port
+
+        host, port = _get_host_port()
+        r = redis.Redis(host=host, port=port, decode_responses=True)
+        r.delete(self.KEY, self.OTHER_KEY)
+        yield r
+        r.delete(self.KEY, self.OTHER_KEY)
+        r.close()
+
+    @pytest.fixture
+    def clock(self):
+        class Clock:
+            now = 1_000_000.0
+
+        with patch('docs_app.ai_rate_limiter.time.time', side_effect=lambda: Clock.now):
+            yield Clock
+
+    @pytest.fixture
+    def limiter(self, redis_client, clock):
+        limiter = AIRateLimiter()
+        with patch.object(limiter, '_get_redis', return_value=redis_client):
+            yield limiter
+
+    def _call(self, limiter, clock, at, key=None):
+        clock.now = at
+        return limiter.is_allowed(key or self.KEY, 3, 10)
+
+    def test_allows_up_to_limit_then_blocks(self, limiter, clock):
+        assert [self._call(limiter, clock, t) for t in (1_000_000.0, 1_000_000.1, 1_000_000.2)] == [True] * 3
+        assert self._call(limiter, clock, 1_000_000.3) is False
+
+    def test_window_boundary_and_rejections_not_counted(self, limiter, clock):
+        for t in (1_000_000.0, 1_000_001.0, 1_000_002.0):
+            self._call(limiter, clock, t)
+        assert self._call(limiter, clock, 1_000_005.0) is False
+        assert self._call(limiter, clock, 1_000_009.999) is False
+        # 剛好 10 秒：最早一則滑出窗口，只空出一個名額
+        assert self._call(limiter, clock, 1_000_010.0) is True
+        assert self._call(limiter, clock, 1_000_010.5) is False
+
+    def test_key_expires_after_window(self, limiter, clock, redis_client):
+        self._call(limiter, clock, 1_000_000.0)
+
+        assert redis_client.ttl(self.KEY) == 11
+
+    def test_keys_are_independent(self, limiter, clock):
+        for t in (1_000_000.0, 1_000_000.1, 1_000_000.2):
+            self._call(limiter, clock, t)
+
+        assert self._call(limiter, clock, 1_000_000.3, key=self.OTHER_KEY) is True
+
+    def test_uses_shared_sync_redis_pool(self):
+        sentinel = object()
+        with patch('docs_app.ai_rate_limiter.get_sync_redis', return_value=sentinel):
+            assert AIRateLimiter()._get_redis() is sentinel

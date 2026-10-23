@@ -560,3 +560,120 @@ class TestWSCloseCodes:
         ]
 
         assert len(codes) == len(set(codes)), "Close codes are not unique"
+
+
+class TestRateLimiterSlidingWindow:
+    """
+    滑動窗口限流的實際行為（真實 Redis + 假時鐘）
+
+    既有單元測試 mock 掉 Redis 的 eval 回傳值，Lua 腳本本身從未被執行；
+    這裡以可控的 time.time() 精確驗證額度、窗口邊界與 retry_after。
+    """
+
+    USER_ID = 999931  # 避免與其他測試的 user id 衝突
+    OTHER_USER_ID = 999932
+    DOC_ID = "rate-limit-doc"
+
+    @pytest.fixture
+    async def redis_client(self):
+        """自建獨立 client：redis_pool 的全域 client 會跨測試綁到已關閉的 event loop"""
+        import redis.asyncio as aioredis
+        from docs_app.redis_pool import _get_host_port
+
+        host, port = _get_host_port()
+        r = aioredis.Redis(host=host, port=port, decode_responses=True)
+        keys = [f"ws:ratelimit:user:{uid}:doc:{doc}"
+                for uid in (self.USER_ID, self.OTHER_USER_ID) for doc in (self.DOC_ID, "other-doc")]
+        await r.delete(*keys)
+        yield r
+        await r.delete(*keys)
+        await r.aclose()
+
+    @pytest.fixture
+    def clock(self):
+        """可控時鐘：clock.now 為目前秒數"""
+        class Clock:
+            now = 1_000_000.0
+
+        with patch('docs_app.rate_limiter.time.time', side_effect=lambda: Clock.now):
+            yield Clock
+
+    @pytest.fixture
+    def limiter(self, redis_client, clock):
+        limiter = RateLimiter()
+        limiter.max_messages = 3
+        limiter.window_seconds = 10
+        with patch.object(limiter, 'get_redis', new_callable=AsyncMock, return_value=redis_client):
+            yield limiter
+
+    async def _send(self, limiter, clock, at, user_id=None, doc_id=None):
+        clock.now = at
+        return await limiter.is_allowed(user_id or self.USER_ID, doc_id or self.DOC_ID)
+
+    async def test_allows_up_to_limit_then_blocks_with_retry_after(self, limiter, clock):
+        results = [await self._send(limiter, clock, t) for t in (1_000_000.0, 1_000_000.1, 1_000_000.2)]
+
+        assert [allowed for allowed, _ in results] == [True, True, True]
+        assert [info['remaining'] for _, info in results] == [2, 1, 0]
+        assert all(info['retry_after'] == 0 for _, info in results)
+
+        allowed, info = await self._send(limiter, clock, 1_000_000.5)
+
+        assert allowed is False
+        assert info['remaining'] == 0
+        assert info['limit'] == 3 and info['window'] == 10
+        # 最早一則在 1_000_000.0，需等到 1_000_010.0 才滑出窗口
+        assert info['retry_after'] == pytest.approx(9.5)
+
+    async def test_blocked_attempts_do_not_consume_quota(self, limiter, clock):
+        for t in (1_000_000.0, 1_000_001.0, 1_000_002.0):
+            await self._send(limiter, clock, t)
+        for t in (1_000_003.0, 1_000_004.0, 1_000_005.0):
+            assert (await self._send(limiter, clock, t))[0] is False
+
+        # 第一則滑出窗口後只空出一個名額（被拒絕的嘗試不應被記錄）
+        assert (await self._send(limiter, clock, 1_000_010.0))[0] is True
+        assert (await self._send(limiter, clock, 1_000_010.5))[0] is False
+
+    async def test_window_boundary(self, limiter, clock):
+        for t in (1_000_000.0, 1_000_001.0, 1_000_002.0):
+            await self._send(limiter, clock, t)
+
+        # 窗口內最後 1ms：最早一則仍在窗口中
+        assert (await self._send(limiter, clock, 1_000_009.999))[0] is False
+        # 剛好 10 秒：最早一則滑出窗口
+        allowed, info = await self._send(limiter, clock, 1_000_010.0)
+        assert allowed is True
+        assert info['remaining'] == 0
+
+    async def test_key_expires_shortly_after_window(self, limiter, clock, redis_client):
+        await self._send(limiter, clock, 1_000_000.0)
+
+        ttl = await redis_client.ttl(f"ws:ratelimit:user:{self.USER_ID}:doc:{self.DOC_ID}")
+        assert ttl == 11  # 窗口 10 秒 + 1 秒緩衝
+
+    async def test_quota_scoped_per_user_and_document(self, limiter, clock):
+        for t in (1_000_000.0, 1_000_000.1, 1_000_000.2):
+            await self._send(limiter, clock, t)
+        assert (await self._send(limiter, clock, 1_000_000.3))[0] is False
+
+        assert (await self._send(limiter, clock, 1_000_000.4, doc_id="other-doc"))[0] is True
+        assert (await self._send(limiter, clock, 1_000_000.5, user_id=self.OTHER_USER_ID))[0] is True
+
+    async def test_fail_open_when_redis_errors(self, clock):
+        limiter = RateLimiter()
+        broken = AsyncMock()
+        broken.eval.side_effect = Exception('redis down')
+        with patch.object(limiter, 'get_redis', new_callable=AsyncMock, return_value=broken):
+            allowed, info = await limiter.is_allowed(self.USER_ID, self.DOC_ID)
+
+        assert allowed is True
+        assert info == {'remaining': limiter.max_messages, 'limit': limiter.max_messages,
+                        'window': limiter.window_seconds, 'retry_after': 0}
+
+    async def test_uses_shared_redis_pool(self):
+        sentinel = object()
+        with patch('docs_app.rate_limiter.get_async_redis', AsyncMock(return_value=sentinel)):
+            assert await RateLimiter().get_redis() is sentinel
+        with patch('docs_app.connection_manager.get_async_redis', AsyncMock(return_value=sentinel)):
+            assert await ConnectionManager().get_redis() is sentinel

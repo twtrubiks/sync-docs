@@ -110,6 +110,17 @@ class TestDocumentListPagination:
 
         assert data['page_size'] == 100  # MAX_PAGE_SIZE
 
+    def test_page_size_boundaries(self, auth_client, many_documents):
+        """測試 page_size 邊界：1 為合法最小值、0 / 負數改用預設、剛好上限不截斷"""
+        one = auth_client.get('/api/documents/?page_size=1').json()
+        assert (one['page_size'], len(one['items']), one['total_pages']) == (1, 1, 25)
+
+        for size in (0, -5):
+            data = auth_client.get(f'/api/documents/?page_size={size}').json()
+            assert data['page_size'] == 20  # DEFAULT_PAGE_SIZE
+
+        assert auth_client.get('/api/documents/?page_size=100').json()['page_size'] == 100
+
     def test_page_beyond_range_returns_last_page(self, auth_client, many_documents):
         """測試超出範圍的頁碼回傳最後一頁"""
         response = auth_client.get('/api/documents/?page=999')
