@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/svelte';
 
 // === Mocks (must be before component import) ===
 
@@ -54,48 +54,56 @@ vi.mock('quill-delta', () => {
 	return { default: MockDelta };
 });
 
-// Mock child Svelte components to avoid rendering issues in jsdom
-// Svelte 5 components are functions; return a no-op function as default export
-function createMockComponent() {
-	// Svelte 5 compiled component signature
-	return function MockComponent() {};
-}
-
 // QuillEditor 以 bind:this 取得實例並呼叫游標方法；mock 元件回傳的 exports 即為該實例
 const quillEditorExports = vi.hoisted(() => ({
 	setCursor: vi.fn(),
 	removeCursor: vi.fn()
 }));
 
+// 子元件以 mock 取代；記錄各自收到的 props（Svelte 5 的 props 物件含 getter/setter，
+// 可讀到頁面目前傳入的值、呼叫頁面傳入的 callback，並透過 setter 回寫 bindable prop）
+const harness = vi.hoisted(() => ({
+	props: {} as Record<string, Record<string, unknown>>,
+	editor: null as unknown
+}));
+
+function capture(name: string, exports: Record<string, unknown> = {}) {
+	return function MockComponent(_anchor: unknown, props: Record<string, unknown>) {
+		harness.props[name] = props;
+		if (name === 'QuillEditor' && harness.editor) {
+			props.editor = harness.editor; // 等同 QuillEditor 在 onMount 建立 Quill 後回寫 bind:editor
+		}
+		return exports;
+	};
+}
+
 vi.mock('$lib/components/QuillEditor.svelte', () => ({
-	default: function MockQuillEditor() {
-		return quillEditorExports;
-	}
+	default: capture('QuillEditor', quillEditorExports)
 }));
 
 vi.mock('$lib/components/VersionHistoryPanel.svelte', () => ({
-	default: createMockComponent()
+	default: capture('VersionHistoryPanel')
 }));
 
 vi.mock('$lib/components/AIDialog.svelte', () => ({
-	default: createMockComponent()
+	default: capture('AIDialog')
 }));
 
 vi.mock('$lib/components/AIMetadataDialog.svelte', () => ({
-	default: createMockComponent()
+	default: capture('AIMetadataDialog')
 }));
 
 vi.mock('$lib/components/AIAskDialog.svelte', () => ({
-	default: createMockComponent()
+	default: capture('AIAskDialog')
 }));
 
 vi.mock('$lib/components/CommentPanel.svelte', () => ({
-	default: createMockComponent()
+	default: capture('CommentPanel')
 }));
 
 // Import after mocks
 import Page from './+page.svelte';
-import { get, put, logout, refreshAccessToken } from '$lib/auth';
+import { get, put, del, post, logout, refreshAccessToken } from '$lib/auth';
 import { toastError, toastSuccess, toastWarning } from '$lib/toast';
 import { goto } from '$app/navigation';
 
@@ -137,6 +145,8 @@ function setupBrowserMocks() {
 			onerror: null
 		});
 	}) as unknown as typeof WebSocket;
+	// 頁面以 readyState === WebSocket.OPEN 判斷能否送出，需與真實 WebSocket 有相同常數
+	Object.assign(globalThis.WebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
 
 	// Mock localStorage
 	const store: Record<string, string> = { access_token: 'mock-token' };
@@ -790,5 +800,432 @@ describe('Document Page - initial permissions and cleanup', () => {
 		expect(ws.close).toHaveBeenCalled();
 		expect(ws.onclose).toBeNull();
 		expect(globalThis.WebSocket).toHaveBeenCalledTimes(1);
+	});
+});
+
+// ── 依賴 Quill 實例的編輯流程（假 editor 透過 bind:editor 回寫給頁面）──
+
+function createFakeEditor(initialText = 'Hello world\n') {
+	let text = initialText;
+	return {
+		selection: null as { index: number; length: number } | null,
+		getSelection: vi.fn(function (this: { selection: unknown }) {
+			return this.selection;
+		}),
+		getText: vi.fn((index?: number, length?: number) =>
+			index === undefined ? text : text.slice(index, index + (length ?? text.length))
+		),
+		getFormat: vi.fn(() => ({ bold: true })),
+		deleteText: vi.fn((index: number, length: number) => {
+			text = text.slice(0, index) + text.slice(index + length);
+		}),
+		insertText: vi.fn((index: number, value: string) => {
+			text = text.slice(0, index) + value + text.slice(index);
+		}),
+		getContents: vi.fn(() => ({ ops: [{ insert: text }] })),
+		setContents: vi.fn(),
+		updateContents: vi.fn(),
+		setText(value: string) {
+			text = value;
+		}
+	};
+}
+
+describe('Document Page - editing with the editor instance', () => {
+	let editor: ReturnType<typeof createFakeEditor>;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		setupBrowserMocks();
+		vi.mocked(get).mockResolvedValue(mockDoc);
+		editor = createFakeEditor();
+		harness.editor = editor;
+		harness.props = {};
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		harness.editor = null;
+	});
+
+	async function ready() {
+		render(Page);
+		await waitFor(() => expect(globalThis.WebSocket).toHaveBeenCalled());
+		await waitFor(() => expect(harness.props.QuillEditor).toBeDefined());
+		const ws = vi.mocked(globalThis.WebSocket).mock.instances[0] as unknown as MockWebSocket;
+		ws.onopen!({});
+		return ws;
+	}
+
+	function quill() {
+		return harness.props.QuillEditor as {
+			onTextChange: (d: { delta: unknown; source: string }) => void;
+			onSelectionChange: (r: { index: number; length: number } | null) => void;
+		};
+	}
+
+	function sent(ws: MockWebSocket) {
+		return ws.send.mock.calls.map(([raw]) => JSON.parse(raw as string));
+	}
+
+	function receive(ws: MockWebSocket, data: Record<string, unknown>) {
+		ws.onmessage!({ data: JSON.stringify(data) });
+	}
+
+	it('applies remote deltas and restored content silently', async () => {
+		const ws = await ready();
+		const delta = { ops: [{ retain: 1 }, { insert: 'x' }] };
+
+		receive(ws, { type: 'doc_update', delta });
+		receive(ws, {
+			type: 'doc_restored',
+			content: { ops: [{ insert: 'old\n' }] },
+			updated_at: '2026-03-08T09:30:00Z',
+			restored_by: '2',
+			restored_by_username: 'alice',
+			restored_to_version: 1,
+			new_version_number: 2
+		});
+
+		expect(editor.updateContents).toHaveBeenCalledWith(delta, 'silent');
+		expect(editor.setContents).toHaveBeenCalledWith([{ insert: 'old\n' }], 'silent');
+	});
+
+	it('sends local edits immediately, then throttles and composes bursts', async () => {
+		const ws = await ready();
+		vi.useFakeTimers();
+
+		quill().onTextChange({ delta: { ops: [{ insert: 'a' }] }, source: 'user' });
+		expect(sent(ws)).toEqual([{ delta: { ops: [{ insert: 'a' }] } }]);
+
+		quill().onTextChange({ delta: { ops: [{ insert: 'b' }] }, source: 'user' });
+		quill().onTextChange({ delta: { ops: [{ insert: 'c' }] }, source: 'user' });
+		expect(sent(ws)).toHaveLength(1);
+
+		await vi.advanceTimersByTimeAsync(150);
+		expect(sent(ws)).toEqual([
+			{ delta: { ops: [{ insert: 'a' }] } },
+			{ delta: { ops: [{ insert: 'b' }, { insert: 'c' }] } }
+		]);
+	});
+
+	it('ignores non-user changes', async () => {
+		const ws = await ready();
+		vi.useFakeTimers();
+
+		quill().onTextChange({ delta: { ops: [{ insert: 'remote' }] }, source: 'api' });
+		await vi.advanceTimersByTimeAsync(2000);
+
+		expect(ws.send).not.toHaveBeenCalled();
+		expect(put).not.toHaveBeenCalled();
+	});
+
+	it('saves edited content from the editor after the debounce', async () => {
+		vi.mocked(put).mockResolvedValue({});
+		await ready();
+		vi.useFakeTimers();
+
+		quill().onTextChange({ delta: { ops: [{ insert: '!' }] }, source: 'user' });
+		await vi.advanceTimersByTimeAsync(1499);
+		expect(put).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1);
+
+		expect(put).toHaveBeenCalledWith('/documents/test-doc-123/', {
+			title: 'Test Document',
+			content: { ops: [{ insert: 'Hello world\n' }] }
+		});
+	});
+
+	it('keeps content dirty after a failed save so the next save resends it', async () => {
+		vi.mocked(put).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({});
+		await ready();
+		const title = screen.getByPlaceholderText('Untitled Document');
+		vi.useFakeTimers();
+
+		quill().onTextChange({ delta: { ops: [{ insert: '!' }] }, source: 'user' });
+		await vi.advanceTimersByTimeAsync(1500);
+		expect(toastError).toHaveBeenCalledWith('Failed to save document.');
+
+		await fireEvent.input(title, { target: { value: 'Renamed' } });
+		await vi.advanceTimersByTimeAsync(1500);
+
+		expect(put).toHaveBeenLastCalledWith('/documents/test-doc-123/', {
+			title: 'Renamed',
+			content: { ops: [{ insert: 'Hello world\n' }] }
+		});
+	});
+
+	it('throttles cursor updates to the latest position', async () => {
+		const ws = await ready();
+		vi.useFakeTimers();
+
+		quill().onSelectionChange({ index: 1, length: 0 });
+		quill().onSelectionChange({ index: 4, length: 2 });
+		expect(ws.send).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(150);
+
+		expect(sent(ws)).toEqual([{ type: 'cursor_move', index: 4, length: 2 }]);
+	});
+
+	it('does not send cursors for read-only users or empty selections', async () => {
+		const ws = await ready();
+		vi.useFakeTimers();
+
+		quill().onSelectionChange(null);
+		receive(ws, { type: 'permission_update', can_write: false });
+		quill().onSelectionChange({ index: 1, length: 0 });
+		await vi.advanceTimersByTimeAsync(500);
+
+		expect(ws.send).not.toHaveBeenCalled();
+	});
+
+	describe('AI writing assistant', () => {
+		function aiDialog() {
+			return harness.props.AIDialog as {
+				isOpen: boolean;
+				selectedText: string;
+				streaming: boolean;
+				streamText: string;
+				onApply: (text: string) => void;
+				onStream: (action: string, text: string) => boolean;
+				onCancelStream: () => void;
+			};
+		}
+
+		it('requires a selection before opening', async () => {
+			await ready();
+
+			await fireEvent.click(screen.getByTitle('AI Writing Assistant'));
+
+			expect(toastWarning).toHaveBeenCalledWith('Please select text first');
+			expect(aiDialog().isOpen).toBe(false);
+		});
+
+		it('replaces the selected text while keeping its formatting', async () => {
+			await ready();
+			editor.selection = { index: 6, length: 5 };
+
+			await fireEvent.click(screen.getByTitle('AI Writing Assistant'));
+			expect(aiDialog().isOpen).toBe(true);
+			expect(aiDialog().selectedText).toBe('world');
+
+			aiDialog().onApply('there');
+
+			expect(editor.getFormat).toHaveBeenCalledWith(6, 5);
+			expect(editor.deleteText).toHaveBeenCalledWith(6, 5, 'user');
+			expect(editor.insertText).toHaveBeenCalledWith(6, 'there', { bold: true }, 'user');
+		});
+
+		it('refuses to apply when collaborators changed the selected text', async () => {
+			await ready();
+			editor.selection = { index: 6, length: 5 };
+			await fireEvent.click(screen.getByTitle('AI Writing Assistant'));
+
+			editor.setText('Hello WORLD\n');
+			aiDialog().onApply('there');
+
+			expect(toastWarning).toHaveBeenCalledWith('Text was modified. Please reselect.');
+			expect(editor.deleteText).not.toHaveBeenCalled();
+		});
+
+		it('streams over the socket and accumulates chunks', async () => {
+			const ws = await ready();
+
+			expect(aiDialog().onStream('polish', 'abc')).toBe(true);
+			expect(sent(ws)).toEqual([{ type: 'ai_stream', action: 'polish', text: 'abc' }]);
+			receive(ws, { type: 'ai_stream_start', action: 'polish' });
+			receive(ws, { type: 'ai_stream_chunk', chunk: '潤' });
+			receive(ws, { type: 'ai_stream_chunk', chunk: '飾' });
+			await waitFor(() => expect(aiDialog().streamText).toBe('潤飾'));
+			expect(aiDialog().streaming).toBe(true);
+
+			receive(ws, { type: 'ai_stream_end', action: 'polish' });
+			await waitFor(() => expect(aiDialog().streaming).toBe(false));
+		});
+
+		it('cancels a running stream over the socket', async () => {
+			const ws = await ready();
+			aiDialog().onStream('summarize', 'abc');
+
+			aiDialog().onCancelStream();
+
+			expect(sent(ws).at(-1)).toEqual({ type: 'ai_stream_cancel' });
+			await waitFor(() => expect(aiDialog().streaming).toBe(false));
+		});
+
+		it('refuses to stream when the socket is not open', async () => {
+			const ws = await ready();
+			ws.readyState = 3; // CLOSED
+
+			expect(aiDialog().onStream('summarize', 'abc')).toBe(false);
+
+			expect(toastError).toHaveBeenCalledWith('連線中斷，無法使用 AI 串流');
+			expect(ws.send).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('whole-document AI dialogs', () => {
+		it.each([
+			['文件分析', 'AIMetadataDialog'],
+			['文件問答', 'AIAskDialog']
+		])('%s warns on an empty document', async (title, dialog) => {
+			editor.setText('  \n');
+			await ready();
+
+			await fireEvent.click(screen.getByTitle(title));
+
+			expect(toastWarning).toHaveBeenCalledWith('文件目前是空的');
+			expect(harness.props[dialog].isOpen).toBe(false);
+		});
+
+		it.each([
+			['文件分析', 'AIMetadataDialog'],
+			['文件問答', 'AIAskDialog']
+		])('%s opens with the full document text', async (title, dialog) => {
+			await ready();
+
+			await fireEvent.click(screen.getByTitle(title));
+
+			expect(harness.props[dialog].isOpen).toBe(true);
+			expect(harness.props[dialog].documentText).toBe('Hello world\n');
+		});
+
+		it('asks questions over the socket with the document text', async () => {
+			const ws = await ready();
+			const ask = harness.props.AIAskDialog as { onAsk: (q: string, t: string) => boolean };
+
+			expect(ask.onAsk('重點？', '全文')).toBe(true);
+
+			expect(sent(ws)).toEqual([
+				{ type: 'ai_ask_stream', question: '重點？', document_text: '全文' }
+			]);
+		});
+	});
+
+	it('reloads the document into the editor after a version restore', async () => {
+		await ready();
+		vi.mocked(get).mockResolvedValue({
+			...mockDoc,
+			title: 'Restored',
+			content: { ops: [{ insert: 'v1\n' }] },
+			updated_at: '2026-03-09T09:00:00Z'
+		});
+
+		await (harness.props.VersionHistoryPanel as { onRestore: () => Promise<void> }).onRestore();
+
+		expect(editor.setContents).toHaveBeenCalledWith([{ insert: 'v1\n' }], 'silent');
+		expect(await screen.findByDisplayValue('Restored')).toBeInTheDocument();
+		expect(screen.getByText('All changes saved')).toBeInTheDocument();
+	});
+});
+
+describe('Document Page - sharing and deleting', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		setupBrowserMocks();
+		harness.editor = null;
+		vi.mocked(get).mockImplementation((url: string) =>
+			Promise.resolve(
+				url.includes('/collaborators/')
+					? [{ id: 2, username: 'alice', email: 'alice@example.com', permission: 'write' }]
+					: mockDoc
+			)
+		);
+	});
+
+	async function openShare() {
+		render(Page);
+		await fireEvent.click(await screen.findByTitle('Share'));
+		await screen.findByLabelText('Change permission for alice');
+	}
+
+	it('adds a collaborator with the chosen permission and resets the form', async () => {
+		vi.mocked(post).mockResolvedValue({
+			id: 3,
+			username: 'bob',
+			email: null,
+			permission: 'read'
+		});
+		await openShare();
+		const input = screen.getByPlaceholderText('Enter username') as HTMLInputElement;
+
+		await fireEvent.input(input, { target: { value: 'bob' } });
+		await fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: 'read' } });
+		await fireEvent.click(screen.getByText('Add'));
+
+		await waitFor(() =>
+			expect(toastSuccess).toHaveBeenCalledWith('Successfully added bob as a collaborator.')
+		);
+		expect(post).toHaveBeenCalledWith('/documents/test-doc-123/collaborators/', {
+			username: 'bob',
+			permission: 'read'
+		});
+		expect(await screen.findByLabelText('Change permission for bob')).toBeInTheDocument();
+		expect(input.value).toBe('');
+		expect((screen.getAllByRole('combobox')[0] as HTMLSelectElement).value).toBe('write');
+	});
+
+	it('does not submit an empty username and shows backend errors', async () => {
+		await openShare();
+		await fireEvent.click(screen.getByText('Add'));
+		expect(post).not.toHaveBeenCalled();
+
+		vi.mocked(post).mockRejectedValue(new Error('No User matches the given query.'));
+		await fireEvent.input(screen.getByPlaceholderText('Enter username'), {
+			target: { value: 'ghost' }
+		});
+		await fireEvent.click(screen.getByText('Add'));
+
+		await waitFor(() =>
+			expect(toastError).toHaveBeenCalledWith('No User matches the given query.')
+		);
+	});
+
+	it('removes a collaborator after confirmation', async () => {
+		vi.mocked(del).mockResolvedValue(null);
+		await openShare();
+
+		await fireEvent.click(screen.getByTitle('Remove collaborator'));
+		expect(screen.getByText('alice', { selector: 'strong' })).toBeInTheDocument();
+		await fireEvent.click(screen.getByText('Remove'));
+
+		await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('Collaborator removed.'));
+		expect(del).toHaveBeenCalledWith('/documents/test-doc-123/collaborators/2/');
+		expect(screen.queryByLabelText('Change permission for alice')).toBeNull();
+		expect(screen.queryByText('Remove Collaborator')).toBeNull();
+	});
+
+	it('keeps the collaborator when removal fails', async () => {
+		vi.mocked(del).mockRejectedValue(new Error('boom'));
+		await openShare();
+
+		await fireEvent.click(screen.getByTitle('Remove collaborator'));
+		await fireEvent.click(screen.getByText('Remove'));
+
+		await waitFor(() => expect(toastError).toHaveBeenCalledWith('Failed to remove collaborator.'));
+		expect(screen.getByLabelText('Change permission for alice')).toBeInTheDocument();
+	});
+
+	it('deletes the document after confirmation and returns to the dashboard', async () => {
+		vi.mocked(del).mockResolvedValue(null);
+		render(Page);
+
+		await fireEvent.click(await screen.findByTitle('Delete'));
+		await fireEvent.click(within(screen.getByRole('alertdialog')).getByText('刪除'));
+
+		await waitFor(() => expect(goto).toHaveBeenCalledWith('/dashboard'));
+		expect(del).toHaveBeenCalledWith('/documents/test-doc-123/');
+		expect(toastSuccess).toHaveBeenCalledWith('文件已成功刪除');
+	});
+
+	it('stays on the page when deleting fails', async () => {
+		vi.mocked(del).mockRejectedValue(new Error('boom'));
+		render(Page);
+
+		await fireEvent.click(await screen.findByTitle('Delete'));
+		await fireEvent.click(within(screen.getByRole('alertdialog')).getByText('刪除'));
+
+		await waitFor(() => expect(toastError).toHaveBeenCalledWith('刪除文件失敗'));
+		expect(goto).not.toHaveBeenCalled();
 	});
 });

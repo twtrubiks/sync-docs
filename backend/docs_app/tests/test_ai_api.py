@@ -381,6 +381,13 @@ class TestAIServiceErrorHandling:
                 await _call_service(method)
         assert excinfo.value is exc
 
+    @override_settings(AI_PROVIDER='gemini', GOOGLE_API_KEY='g-key', NVIDIA_API_KEY='')
+    async def test_gemini_with_google_key_is_configured(self):
+        """供應商為 gemini 且有 GOOGLE_API_KEY 時，即使沒有 NVIDIA key 也可使用"""
+        with _get_proofread_agent().override(model=TestModel()):
+            result = await AIService().proofread('文字')
+        assert isinstance(result, ProofreadResult)
+
     @override_settings(AI_PROVIDER='gemini', GOOGLE_API_KEY='', NVIDIA_API_KEY='nv-key')
     async def test_gemini_requires_google_key(self):
         """供應商為 gemini 時檢查的是 GOOGLE_API_KEY，而非 NVIDIA_API_KEY"""
