@@ -371,9 +371,9 @@ AI 功能以 **Pydantic AI** 串接 LLM，依 `AI_PROVIDER` 在 **NVIDIA NIM**�
 |------|------|------|
 | API | `ai_api.py` | HTTP 端點（校對 / 分析）：認證、速率限制檢查、回應格式 |
 | 服務 | `ai_service.py` | Pydantic AI agent 組合、供應商切換、Prompt、錯誤處理 |
-| 速率限制 | `ai_rate_limiter.py` | Redis Sorted Set 滑動窗口 |
+| 速率限制 | `ai_rate_limiter.py` | Redis Sorted Set 滑動窗口（Lua 腳本原子執行） |
 
-**速率限制：** 每用戶 10 次/60 秒，兩個 HTTP 端點與 WebSocket 串流共用同一額度鍵 `ai:{user_id}`，使用 Redis Sorted Set（與 WebSocket 速率限制相同演算法）。AI 速率限制採 fail-open（錯誤時放行），與 WebSocket 連接管理的 fail-closed 策略不同，因為 AI 請求不涉及持續資源佔用。
+**速率限制：** 每用戶 10 次/60 秒，兩個 HTTP 端點與 WebSocket 串流共用同一額度鍵 `ai:{user_id}`，使用 Redis Sorted Set（與 WebSocket 速率限制相同演算法），清除過期記錄、檢查額度與記錄本次請求在同一個 Lua 腳本內原子完成，並發請求不會同時通過檢查而超出額度。AI 速率限制採 fail-open（錯誤時放行），與 WebSocket 連接管理的 fail-closed 策略不同，因為 AI 請求不涉及持續資源佔用。
 
 **Pydantic AI Agent：** 底層 model 與摘要/潤稿、校對、分析、問答各 agent 皆延遲初始化（lazy init），避免模組載入時 Django settings 未就緒；全域單例、共用同一 model（供應商可切換），不重複建立連線。校對與分析以 `output_type` 取得型別安全的結構化結果，問答則以 `deps_type` + `@agent.tool` 注入並讀取整份文件內容。
 
@@ -1028,7 +1028,7 @@ WEBSOCKET_HEARTBEAT_INTERVAL = 120  # 2 分鐘
 WEBSOCKET_RATE_LIMIT_MESSAGES = 30
 WEBSOCKET_RATE_LIMIT_WINDOW = 10
 ```
-- ✅ 使用 Redis Sorted Set 實現滑動窗口
+- ✅ 使用 Redis Sorted Set 實現滑動窗口（Lua 腳本原子執行檢查與記錄）
 - ✅ 返回 retry_after 提示客戶端等待時間
 - ✅ 防止惡意客戶端濫發消息
 
@@ -1180,9 +1180,12 @@ Field TTL: 300 秒（HEXPIRE，Redis >= 7.4）
 ```
 Key: ws:ratelimit:user:{user_id}:doc:{document_id}
 Type: SORTED SET
-Score: timestamp
+Score: timestamp（毫秒）
+Member: {timestamp}-{隨機後綴}
 ```
 - 滑動窗口算法，無需定期清理
+- Member 加上隨機後綴：只用時間戳的話，同一毫秒內的多則消息會寫到同一個 member、只算一次
+- AI 請求與登入/註冊限流（`ai:{user_id}`、IP key）使用相同結構
 - 自動過期機制（窗口 + 1 秒，略大於窗口確保舊數據被清理）
 
 ---

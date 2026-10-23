@@ -4,10 +4,37 @@ AI API 速率限制器
 """
 
 import time
+import uuid
 import logging
 from .redis_pool import get_sync_redis
 
 logger = logging.getLogger('docs_app')
+
+# Lua 腳本：原子性地清除過期記錄、檢查額度並記錄本次請求。
+# 若拆成「先查數量、再另外 ZADD」，並發請求可能同時通過檢查而超出額度。
+SLIDING_WINDOW_SCRIPT = """
+local key = KEYS[1]
+local now_ms = tonumber(ARGV[1])
+local window_start_ms = tonumber(ARGV[2])
+local max_requests = tonumber(ARGV[3])
+local window_seconds = tonumber(ARGV[4])
+local member = ARGV[5]
+
+-- 移除過期的時間戳
+redis.call('ZREMRANGEBYSCORE', key, '-inf', window_start_ms)
+
+-- 計算當前窗口內的請求數
+local count = redis.call('ZCARD', key)
+if count >= max_requests then
+    return 0
+end
+
+-- 記錄本次請求（score 為時間戳；member 由呼叫端產生、保證唯一）
+redis.call('ZADD', key, now_ms, member)
+-- 設置過期時間（略大於窗口，確保舊數據被清理）
+redis.call('EXPIRE', key, window_seconds + 1)
+return 1
+"""
 
 
 class AIRateLimiter:
@@ -39,30 +66,19 @@ class AIRateLimiter:
             r = self._get_redis()
             now_ms = int(time.time() * 1000)
             window_start_ms = now_ms - (window_seconds * 1000)
+            # member 必須唯一：只用時間戳的話，同一毫秒內的多個請求會寫到同一個 member、只算一次
+            member = f"{now_ms}-{uuid.uuid4().hex}"
 
-            # 使用 pipeline 原子操作
-            pipe = r.pipeline()
-            # 移除過期的時間戳
-            pipe.zremrangebyscore(key, '-inf', window_start_ms)
-            # 計算當前窗口內的請求數
-            pipe.zcard(key)
-            results = pipe.execute()
+            allowed = r.eval(
+                SLIDING_WINDOW_SCRIPT, 1, key,
+                now_ms, window_start_ms, max_requests, window_seconds, member
+            ) == 1
 
-            current_count = results[1]
-
-            if current_count >= max_requests:
+            if not allowed:
                 logger.warning(
-                    f"AI rate limit exceeded: key={key}, "
-                    f"count={current_count}/{max_requests}"
+                    f"AI rate limit exceeded: key={key}, limit={max_requests}/{window_seconds}s"
                 )
-                return False
-
-            # 添加當前時間戳
-            r.zadd(key, {str(now_ms): now_ms})
-            # 設置過期時間
-            r.expire(key, window_seconds + 1)
-
-            return True
+            return allowed
 
         except Exception as e:
             logger.error(f"AI rate limiter error: {str(e)}")

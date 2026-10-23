@@ -285,12 +285,10 @@ class TestAIRateLimiter:
     """AI Rate Limiter 單元測試"""
 
     def test_is_allowed_returns_true_when_under_limit(self):
-        """測試在限制內時返回 True"""
+        """測試在限制內時返回 True（Lua 腳本回傳 1）"""
         with patch.object(AIRateLimiter, '_get_redis') as mock_redis:
             mock_r = MagicMock()
-            mock_pipe = MagicMock()
-            mock_pipe.execute.return_value = [None, 0]  # 0 個請求
-            mock_r.pipeline.return_value = mock_pipe
+            mock_r.eval.return_value = 1
             mock_redis.return_value = mock_r
 
             limiter = AIRateLimiter()
@@ -299,12 +297,10 @@ class TestAIRateLimiter:
             assert result is True
 
     def test_is_allowed_returns_false_when_over_limit(self):
-        """測試超過限制時返回 False"""
+        """測試超過限制時返回 False（Lua 腳本回傳 0）"""
         with patch.object(AIRateLimiter, '_get_redis') as mock_redis:
             mock_r = MagicMock()
-            mock_pipe = MagicMock()
-            mock_pipe.execute.return_value = [None, 10]  # 已達到 10 個請求的限制
-            mock_r.pipeline.return_value = mock_pipe
+            mock_r.eval.return_value = 0
             mock_redis.return_value = mock_r
 
             limiter = AIRateLimiter()
@@ -644,6 +640,39 @@ class TestAIRateLimiterSlidingWindow:
             self._call(limiter, clock, t)
 
         assert self._call(limiter, clock, 1_000_000.3, key=self.OTHER_KEY) is True
+
+    def test_same_millisecond_burst_is_limited(self, limiter, clock, redis_client):
+        """同一毫秒內的多個請求必須各自計數（member 不可只用時間戳）"""
+        results = [self._call(limiter, clock, 1_000_000.0) for _ in range(5)]
+
+        assert results == [True, True, True, False, False]
+        assert redis_client.zcard(self.KEY) == 3
+
+    def test_concurrent_requests_never_exceed_limit(self, redis_client):
+        """並發請求不可同時通過檢查而超出額度（檢查與記錄必須是原子操作）"""
+        import threading
+
+        limiter = AIRateLimiter()
+        barrier = threading.Barrier(20)
+        results = []
+        lock = threading.Lock()
+
+        def worker():
+            barrier.wait()
+            allowed = limiter.is_allowed(self.KEY, 5, 10)
+            with lock:
+                results.append(allowed)
+
+        with patch.object(limiter, '_get_redis', return_value=redis_client):
+            threads = [threading.Thread(target=worker) for _ in range(20)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        assert results.count(True) == 5
+        assert results.count(False) == 15
+        assert redis_client.zcard(self.KEY) == 5
 
     def test_uses_shared_sync_redis_pool(self):
         sentinel = object()

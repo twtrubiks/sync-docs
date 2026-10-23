@@ -718,6 +718,20 @@ class TestRateLimiterSlidingWindow:
         assert allowed is True
         assert info['remaining'] == 0
 
+    async def test_same_millisecond_burst_is_limited(self, limiter, clock, redis_client):
+        """同一毫秒內的多則消息必須各自計數（member 不可只用時間戳）"""
+        results = [await self._send(limiter, clock, 1_000_000.0) for _ in range(5)]
+
+        assert [allowed for allowed, _ in results] == [True, True, True, False, False]
+        assert [info['remaining'] for _, info in results[:3]] == [2, 1, 0]
+        key = f"ws:ratelimit:user:{self.USER_ID}:doc:{self.DOC_ID}"
+        assert await redis_client.zcard(key) == 3
+
+    async def test_concurrent_messages_never_exceed_limit(self, limiter, clock):
+        results = await asyncio.gather(*(limiter.is_allowed(self.USER_ID, self.DOC_ID) for _ in range(10)))
+
+        assert [allowed for allowed, _ in results].count(True) == 3
+
     async def test_key_expires_shortly_after_window(self, limiter, clock, redis_client):
         await self._send(limiter, clock, 1_000_000.0)
 

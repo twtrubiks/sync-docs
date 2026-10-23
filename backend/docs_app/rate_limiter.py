@@ -4,6 +4,7 @@ WebSocket 速率限制器
 """
 
 import time
+import uuid
 import logging
 from django.conf import settings
 from .redis_pool import get_async_redis
@@ -18,7 +19,7 @@ class RateLimiter:
 
     使用 Redis Sorted Set 追蹤消息時間戳：
     - Key: ws:ratelimit:user:{user_id}:doc:{document_id}
-    - Member: 消息時間戳（毫秒）
+    - Member: 時間戳（毫秒）+ 隨機後綴，確保同一毫秒的多則消息各自計數
     - Score: 消息時間戳（毫秒）
 
     滑動窗口算法：
@@ -65,6 +66,8 @@ class RateLimiter:
         key = self._get_key(user_id, document_id)
         now_ms = int(time.time() * 1000)
         window_start_ms = now_ms - (self.window_seconds * 1000)
+        # member 必須唯一：只用時間戳的話，同一毫秒內的多則消息會寫到同一個 member、只算一次
+        member = f"{now_ms}-{uuid.uuid4().hex}"
 
         # Lua 腳本：原子性操作
         lua_script = """
@@ -73,6 +76,7 @@ class RateLimiter:
         local window_start_ms = tonumber(ARGV[2])
         local max_messages = tonumber(ARGV[3])
         local window_ms = tonumber(ARGV[4])
+        local member = ARGV[5]
 
         -- 移除過期的時間戳
         redis.call('ZREMRANGEBYSCORE', key, '-inf', window_start_ms)
@@ -93,8 +97,8 @@ class RateLimiter:
             return {0, count, retry_after}
         end
 
-        -- 添加當前時間戳（使用時間戳作為 member 確保唯一性）
-        redis.call('ZADD', key, now_ms, now_ms)
+        -- 添加當前消息（score 為時間戳；member 由呼叫端產生、保證唯一）
+        redis.call('ZADD', key, now_ms, member)
         -- 設置 key 過期時間（略大於窗口，確保舊數據被清理）
         redis.call('EXPIRE', key, math.ceil(window_ms / 1000) + 1)
 
@@ -105,7 +109,8 @@ class RateLimiter:
             result = await r.eval(
                 lua_script, 1, key,
                 now_ms, window_start_ms,
-                self.max_messages, self.window_seconds * 1000
+                self.max_messages, self.window_seconds * 1000,
+                member
             )
 
             allowed = result[0] == 1
