@@ -30,7 +30,7 @@ async def consume_connection_success(communicator, timeout=2):
     assert response['type'] == 'connection_success'
 
     # 消費 presence_sync（新功能）
-    presence_response = await communicator.receive_json_from(timeout=timeout)
+    presence_response = await receive_json_skipping_user_join(communicator, timeout=timeout)
     assert presence_response['type'] == 'presence_sync'
 
     return response
@@ -70,6 +70,19 @@ async def consume_user_join_if_any(communicator, timeout=0.3):
         return None
     except asyncio.TimeoutError:
         return None
+
+
+async def receive_json_skipping_user_join(communicator, timeout=2):
+    """
+    接收下一則非 user_join 的消息
+
+    多客戶端測試中，後連線的客戶端若在先連線者廣播 user_join 之前就已加入房間組，
+    也會收到先連線者的 user_join（取決於排程先後的正常競態），不應讓測試因此失敗。
+    """
+    while True:
+        msg = await communicator.receive_json_from(timeout=timeout)
+        if msg.get('type') != 'user_join':
+            return msg
 
 
 class TestWebSocketConnection:
@@ -218,7 +231,7 @@ class TestWebSocketReadOnlyPermission:
             })
 
             # 應該收到 READ_ONLY 錯誤
-            error_response = await comm_read_only.receive_json_from(timeout=2)
+            error_response = await receive_json_skipping_user_join(comm_read_only, timeout=2)
             assert error_response['type'] == 'error'
             assert error_response['error_code'] == 'READ_ONLY'
 
@@ -265,7 +278,7 @@ class TestWebSocketReadOnlyPermission:
             })
 
             # 只讀用戶應該收到廣播
-            response = await comm_read_only.receive_json_from(timeout=2)
+            response = await receive_json_skipping_user_join(comm_read_only, timeout=2)
             assert response['type'] == 'doc_update'
             assert response['delta']['ops'][0]['insert'] == 'Hello from owner'
 
@@ -327,7 +340,7 @@ class TestWebSocketBroadcast:
             await comm_owner.send_json_to(delta_message)
 
             # 協作者應該收到廣播
-            response = await comm_collaborator.receive_json_from(timeout=2)
+            response = await receive_json_skipping_user_join(comm_collaborator, timeout=2)
 
             assert response["type"] == "doc_update"
             assert response["delta"]["ops"][0]["insert"] == "Hello from owner"
@@ -378,7 +391,7 @@ class TestWebSocketBroadcast:
             await comm_owner.send_json_to(delta_message)
 
             # 協作者應該收到
-            response = await comm_collaborator.receive_json_from(timeout=2)
+            response = await receive_json_skipping_user_join(comm_collaborator, timeout=2)
             assert response["type"] == "doc_update"
 
             # 擁有者不應該收到自己的消息
@@ -439,8 +452,8 @@ class TestWebSocketBroadcast:
             await comm_1.send_json_to(delta_message)
 
             # 客戶端 2 和 3 都應該收到
-            response_2 = await comm_2.receive_json_from(timeout=2)
-            response_3 = await comm_3.receive_json_from(timeout=2)
+            response_2 = await receive_json_skipping_user_join(comm_2, timeout=2)
+            response_3 = await receive_json_skipping_user_join(comm_3, timeout=2)
 
             assert response_2["type"] == "doc_update"
             assert response_3["type"] == "doc_update"
@@ -507,7 +520,7 @@ class TestWebSocketConcurrency:
             received_count = 0
             for _ in range(num_messages):
                 try:
-                    response = await comm_receiver.receive_json_from(timeout=3)
+                    response = await receive_json_skipping_user_join(comm_receiver, timeout=3)
                     if response.get("type") == "doc_update":
                         received_count += 1
                 except asyncio.TimeoutError:
@@ -603,7 +616,7 @@ class TestWebSocketUnicode:
             })
 
             # 接收並驗證
-            response = await comm_receiver.receive_json_from(timeout=2)
+            response = await receive_json_skipping_user_join(comm_receiver, timeout=2)
             assert response["type"] == "doc_update"
             assert response["delta"]["ops"][0]["insert"] == unicode_text
 
@@ -650,7 +663,7 @@ class TestWebSocketUnicode:
             })
 
             # 接收並驗證
-            response = await comm_receiver.receive_json_from(timeout=2)
+            response = await receive_json_skipping_user_join(comm_receiver, timeout=2)
             assert response["type"] == "doc_update"
             assert response["delta"]["ops"][0]["insert"] == special_text
 

@@ -129,6 +129,7 @@ def test_user_registration_with_duplicate_username(client, user_data):
         content_type="application/json"
     )
     assert response2.status_code == 400
+    assert response2.json()["detail"] == "用戶名已存在"
 
     # 確保只有一個用戶被創建
     assert User.objects.count() == 1
@@ -150,6 +151,10 @@ def test_user_registration_with_weak_password(client):
         content_type="application/json"
     )
     assert response.status_code == 400
+    # 多條密碼驗證錯誤以 "; " 串接成一則訊息顯示給使用者
+    messages = response.json()["detail"].split("; ")
+    assert "This password is too short. It must contain at least 8 characters." in messages
+    assert "This password is entirely numeric." in messages
 
     # 確保用戶沒有被創建
     assert User.objects.count() == 0

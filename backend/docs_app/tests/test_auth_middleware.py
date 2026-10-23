@@ -268,3 +268,52 @@ async def test_middleware_rejects_refresh_token(test_user, refresh_jwt_token):
     assert isinstance(received_scope['user'], AnonymousUser)
     assert received_scope['auth_error'] == AuthErrorType.INVALID_TOKEN
     assert received_scope['accepted_subprotocol'] is None
+
+
+async def _run_middleware(subprotocols):
+    received_scope = {}
+
+    async def mock_app(scope, receive, send):
+        received_scope.update(scope)
+
+    await JWTAuthMiddleware(mock_app)({'type': 'websocket', 'subprotocols': subprotocols}, None, None)
+    return received_scope
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_middleware_token_for_deleted_user(jwt_token_for_nonexistent_user):
+    """簽章有效但用戶不存在（例如帳號已刪除）：USER_NOT_FOUND，不接受 subprotocol"""
+    scope = await _run_middleware([f'access_token.{jwt_token_for_nonexistent_user}'])
+
+    assert isinstance(scope['user'], AnonymousUser)
+    assert scope['auth_error'] == AuthErrorType.USER_NOT_FOUND
+    assert scope['accepted_subprotocol'] is None
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_middleware_access_token_without_user_id():
+    """access token 缺 user_id：視為用戶不存在"""
+    token = jwt.encode({'token_type': 'access'}, settings.SECRET_KEY, algorithm='HS256')
+
+    scope = await _run_middleware([f'access_token.{token}'])
+
+    assert isinstance(scope['user'], AnonymousUser)
+    assert scope['auth_error'] == AuthErrorType.USER_NOT_FOUND
+
+
+async def test_middleware_without_token_sets_no_token_error():
+    scope = await _run_middleware(['graphql'])
+
+    assert isinstance(scope['user'], AnonymousUser)
+    assert scope['auth_error'] == AuthErrorType.NO_TOKEN
+    assert scope['accepted_subprotocol'] is None
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_middleware_accepts_first_access_token_subprotocol(test_user, valid_jwt_token):
+    """多個 access_token.* 時，回傳給瀏覽器的 subprotocol 必須是實際用來認證的第一個"""
+    scope = await _run_middleware([f'access_token.{valid_jwt_token}', 'access_token.other'])
+
+    assert scope['user'].id == test_user.id
+    assert scope['auth_error'] is None
+    assert scope['accepted_subprotocol'] == f'access_token.{valid_jwt_token}'

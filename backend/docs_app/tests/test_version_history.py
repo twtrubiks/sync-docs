@@ -3,11 +3,14 @@
 測試 DocumentVersion 模型和版本 API 端點
 """
 
+import threading
+import time
 import uuid
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
+from django.db import connection, transaction
 from ninja_jwt.tokens import AccessToken
-from docs_app.models import DocumentVersion, DocumentCollaborator, PermissionLevel
+from docs_app.models import Document, DocumentVersion, DocumentCollaborator, PermissionLevel
 
 
 # ===== 版本相關 Fixtures =====
@@ -354,3 +357,43 @@ class TestAutoVersionCreation:
 
         new_count = DocumentVersion.objects.filter(document=test_document).count()
         assert new_count == initial_count  # 沒有變化
+
+
+@pytest.mark.django_db(transaction=True)
+def test_create_version_waits_for_document_row_lock(test_user, test_document):
+    """
+    create_version 以 select_for_update 鎖住文檔列序列化版本號分配：
+    另一個交易持有該列的寫鎖時必須等待，否則並發存檔會算出相同版本號撞 unique 約束。
+
+    持鎖方用 FOR NO KEY UPDATE：它與 FOR UPDATE 衝突，但不擋 FK 插入所需的
+    FOR KEY SHARE——若 create_version 少了行鎖就不會等待，測試即可分辨。
+    """
+    locked = threading.Event()
+    timeline = {}
+
+    def hold_row_lock():
+        try:
+            with transaction.atomic():
+                Document.objects.select_for_update(no_key=True).get(pk=test_document.pk)
+                locked.set()
+                time.sleep(0.5)
+                timeline['released'] = time.monotonic()
+        finally:
+            connection.close()
+
+    def create_version():
+        try:
+            assert locked.wait(5)
+            DocumentVersion.create_version(test_document, test_user)
+            timeline['created'] = time.monotonic()
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=hold_row_lock), threading.Thread(target=create_version)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+
+    assert timeline['created'] >= timeline['released'], "create_version 應等待文檔列鎖釋放"
+    assert DocumentVersion.objects.filter(document=test_document).count() == 1

@@ -531,3 +531,291 @@ class TestDocConsumerAIStream:
         assert getattr(mock_consumer, '_ai_stream_task', None) is None
 
 
+
+
+def _make_consumer(user, document):
+    """建立不經握手、send / channel layer 皆為 mock 的 consumer"""
+    consumer = DocConsumer()
+    consumer.user = user
+    consumer.document_id = str(document.id)
+    consumer.room_group_name = f'doc_{document.id}'
+    consumer.channel_name = 'test_channel'
+    consumer.channel_layer = MagicMock()
+    consumer.channel_layer.group_send = AsyncMock()
+    consumer.channel_layer.group_discard = AsyncMock()
+    consumer.send = AsyncMock()
+    consumer.close = AsyncMock()
+    consumer.can_write = True
+    return consumer
+
+
+def _sent(consumer):
+    return [json.loads(call.kwargs['text_data']) for call in consumer.send.call_args_list]
+
+
+class TestGroupEventHandlers:
+    """房間組事件 → client 訊息（前端依 type 與欄位名分派，欄位改名會讓同步失效）"""
+
+    @pytest.fixture
+    def consumer(self, test_user, test_document):
+        return _make_consumer(test_user, test_document)
+
+    async def test_doc_saved_forwards_timestamp(self, consumer):
+        await consumer.doc_saved({'type': 'doc_saved', 'updated_at': '2026-01-01T00:00:00+00:00'})
+
+        assert _sent(consumer) == [{'type': 'doc_saved', 'updated_at': '2026-01-01T00:00:00+00:00'}]
+
+    async def test_doc_restored_forwards_full_payload(self, consumer):
+        event = {
+            'type': 'doc_restored',
+            'content': {'ops': [{'insert': '舊版內容\n'}]},
+            'updated_at': '2026-01-01T00:00:00+00:00',
+            'restored_by': '7',
+            'restored_by_username': 'alice',
+            'restored_to_version': 3,
+            'new_version_number': 5,
+        }
+
+        await consumer.doc_restored(event)
+
+        assert _sent(consumer) == [event]
+
+    async def test_comment_add(self, consumer):
+        comment = {'id': 'c1', 'content': 'hi', 'parent_id': None}
+
+        await consumer.comment_notification({'type': 'comment_notification', 'action': 'add', 'comment': comment})
+
+        assert _sent(consumer) == [{'type': 'comment_add', 'comment': comment}]
+
+    async def test_comment_update(self, consumer):
+        await consumer.comment_notification({
+            'type': 'comment_notification', 'action': 'update',
+            'comment_id': 'c1', 'content': 'edited', 'updated_at': '2026-01-01T00:00:00+00:00',
+        })
+
+        assert _sent(consumer) == [{
+            'type': 'comment_update', 'comment_id': 'c1', 'content': 'edited',
+            'updated_at': '2026-01-01T00:00:00+00:00',
+        }]
+
+    async def test_comment_delete(self, consumer):
+        await consumer.comment_notification({
+            'type': 'comment_notification', 'action': 'delete', 'comment_id': 'c2', 'parent_id': 'c1',
+        })
+
+        assert _sent(consumer) == [{'type': 'comment_delete', 'comment_id': 'c2', 'parent_id': 'c1'}]
+
+    async def test_comment_unknown_action_is_ignored(self, consumer):
+        await consumer.comment_notification({'type': 'comment_notification', 'action': 'archive'})
+
+        consumer.send.assert_not_called()
+
+
+class TestPermissionCheckEdgeCases:
+    """check_permission_detailed 的未認證與例外路徑（fail-closed）"""
+
+    async def test_anonymous_user_not_authenticated(self, test_document):
+        result = await DocConsumer().check_permission_detailed(AnonymousUser(), str(test_document.id))
+
+        assert result == {
+            'allowed': False, 'can_write': False,
+            'error_type': 'NOT_AUTHENTICATED', 'message': 'User not authenticated',
+        }
+
+    async def test_missing_user_not_authenticated(self, test_document):
+        result = await DocConsumer().check_permission_detailed(None, str(test_document.id))
+
+        assert result['allowed'] is False
+        assert result['error_type'] == 'NOT_AUTHENTICATED'
+
+    async def test_lookup_error_denies_access(self, test_user, test_document):
+        with patch('docs_app.consumers.Document.objects.filter', side_effect=Exception('db down')):
+            result = await DocConsumer().check_permission_detailed(test_user, str(test_document.id))
+
+        assert result == {
+            'allowed': False, 'can_write': False,
+            'error_type': 'PERMISSION_DENIED', 'message': 'Permission check failed',
+        }
+
+
+class TestDisconnectCleanup:
+    """斷線時取消背景任務並清理連線、presence 與房間組"""
+
+    async def test_disconnect_cancels_tasks_and_cleans_up(self, test_user, test_document):
+        consumer = _make_consumer(test_user, test_document)
+        consumer._heartbeat_task = asyncio.create_task(asyncio.sleep(100))
+        consumer._ai_stream_task = asyncio.create_task(asyncio.sleep(100))
+        consumer.remove_user_from_presence = AsyncMock()
+
+        with patch('docs_app.consumers.connection_manager.remove_connection', new_callable=AsyncMock) as remove:
+            await consumer.disconnect(1000)
+
+        assert consumer._heartbeat_task.cancelled()
+        assert consumer._ai_stream_task.cancelled()
+        remove.assert_awaited_once_with(test_user.id, 'test_channel')
+        consumer.remove_user_from_presence.assert_awaited_once()
+        consumer.channel_layer.group_send.assert_awaited_once_with(
+            f'doc_{test_document.id}', {'type': 'user_leave', 'user_id': str(test_user.id)}
+        )
+        consumer.channel_layer.group_discard.assert_awaited_once_with(f'doc_{test_document.id}', 'test_channel')
+
+
+class TestAIStreamEdgeCases:
+
+    @pytest.fixture
+    def consumer(self, test_user, test_document):
+        return _make_consumer(test_user, test_document)
+
+    async def test_cancel_message_via_receive_stops_stream(self, consumer):
+        """前端送出 {type: ai_stream_cancel} 會取消進行中的串流"""
+        started = asyncio.Event()
+
+        async def slow_stream(action, text):
+            started.set()
+            while True:
+                yield 'chunk'
+                await asyncio.sleep(0.01)
+
+        with patch.object(ai_service, 'process_stream', slow_stream), \
+                patch.object(ai_rate_limiter, 'is_allowed', return_value=True):
+            await consumer.receive(text_data=json.dumps({'type': 'ai_stream', 'action': 'summarize', 'text': 't'}))
+            await started.wait()
+            await consumer.receive(text_data=json.dumps({'type': 'ai_stream_cancel'}))
+
+            with pytest.raises(asyncio.CancelledError):
+                await consumer._ai_stream_task
+
+        assert 'ai_stream_end' not in [m['type'] for m in _sent(consumer)]
+
+    async def test_unexpected_error_sends_generic_stream_error(self, consumer):
+        """非 ValueError / RuntimeError 的例外不外洩內部訊息"""
+        async def broken_stream(action, text):
+            raise KeyError('internal detail')
+            yield  # pragma: no cover - 使函式成為 async generator
+
+        with patch.object(ai_service, 'process_stream', broken_stream), \
+                patch.object(ai_rate_limiter, 'is_allowed', return_value=True):
+            await consumer.receive(text_data=json.dumps({'type': 'ai_stream', 'action': 'polish', 'text': 't'}))
+            await consumer._ai_stream_task
+
+        messages = _sent(consumer)
+        assert messages[-1] == {'type': 'ai_stream_error', 'message': 'AI 串流失敗'}
+
+    async def test_rate_limit_shares_http_quota_key(self, consumer, test_user):
+        """WS 串流與 HTTP AI 端點共用 ai:{user_id} 額度與相同上限"""
+        with patch.object(ai_rate_limiter, 'is_allowed', return_value=False) as limiter:
+            await consumer.receive(text_data=json.dumps({'type': 'ai_ask_stream', 'question': 'q'}))
+
+        limiter.assert_called_once_with(f'ai:{test_user.id}', 10, 60)
+        assert _sent(consumer) == [{'type': 'ai_stream_error', 'message': '請求過於頻繁，請稍後再試'}]
+
+
+class TestPresenceFailOpen:
+
+    async def test_presence_sync_sends_empty_list_when_redis_fails(self, test_user, test_document):
+        consumer = _make_consumer(test_user, test_document)
+
+        with patch('docs_app.consumers.get_async_redis', side_effect=Exception('redis down')):
+            await consumer.send_presence_sync()
+
+        assert _sent(consumer) == [{'type': 'presence_sync', 'users': []}]
+
+
+class TestMessageSizeBoundary:
+    """大小限制以 bytes 計且剛好等於上限仍放行（> 才拒絕）"""
+
+    @pytest.fixture
+    def consumer(self, test_user, test_document):
+        return _make_consumer(test_user, test_document)
+
+    async def test_message_at_limit_passes_size_check(self, consumer):
+        await consumer.receive(text_data='x' * MAX_MESSAGE_SIZE)
+
+        [message] = _sent(consumer)
+        assert message['error_code'] == 'INVALID_JSON'  # 通過大小檢查，進入 JSON 解析
+        assert message['message'] == 'Invalid JSON format'  # 前端 toast 直接顯示
+
+    async def test_message_over_limit_rejected(self, consumer):
+        await consumer.receive(text_data='x' * (MAX_MESSAGE_SIZE + 1))
+
+        [message] = _sent(consumer)
+        assert message['error_code'] == 'MESSAGE_TOO_LARGE'
+
+    async def test_size_counted_in_utf8_bytes(self, consumer):
+        """中文一字 3 bytes：字元數未超限但 bytes 超限仍須拒絕"""
+        await consumer.receive(text_data='字' * (MAX_MESSAGE_SIZE // 3 + 1))
+
+        [message] = _sent(consumer)
+        assert message['error_code'] == 'MESSAGE_TOO_LARGE'
+
+
+class TestRejectedConnectionDisconnect:
+
+    async def test_anonymous_disconnect_skips_user_cleanup(self, test_document):
+        """被拒絕的匿名連線斷線時，不應清理連線記錄或廣播 user_leave"""
+        consumer = _make_consumer(AnonymousUser(), test_document)
+        consumer.remove_user_from_presence = AsyncMock()
+
+        with patch('docs_app.consumers.connection_manager.remove_connection', new_callable=AsyncMock) as remove:
+            await consumer.disconnect(4001)
+
+        remove.assert_not_called()
+        consumer.remove_user_from_presence.assert_not_called()
+        consumer.channel_layer.group_send.assert_not_called()
+        consumer.channel_layer.group_discard.assert_awaited_once()
+
+
+class TestDeltaLimitsAndBusyStream:
+
+    @pytest.fixture
+    def consumer(self, test_user, test_document):
+        return _make_consumer(test_user, test_document)
+
+    async def test_ops_count_at_limit_is_broadcast(self, consumer):
+        """剛好 MAX_OPS_COUNT 個操作仍放行（> 才拒絕）"""
+        ops = [{'insert': 'a'}] * MAX_OPS_COUNT
+        with patch('docs_app.consumers.rate_limiter.is_allowed', new_callable=AsyncMock,
+                   return_value=(True, {})):
+            await consumer.receive(text_data=json.dumps({'delta': {'ops': ops}}))
+
+        consumer.send.assert_not_called()
+        consumer.channel_layer.group_send.assert_awaited_once()
+
+    async def test_multiple_validation_errors_joined(self, consumer):
+        with patch('docs_app.consumers.rate_limiter.is_allowed', new_callable=AsyncMock,
+                   return_value=(True, {})):
+            await consumer.receive(text_data=json.dumps({'delta': {'ops': [{'retain': -1}, {'delete': 0}]}}))
+
+        [message] = _sent(consumer)
+        assert message['error_code'] == 'INVALID_DELTA_FORMAT'
+        detail = message['message'].removeprefix('Invalid delta format: ')
+        assert detail.split('; ') == [
+            'Value error, retain must be a positive integer',
+            'Value error, delete must be a positive integer',
+        ]
+
+    async def test_busy_stream_rejects_without_starting_another(self, consumer):
+        """忙碌中的第二個請求只回錯誤，不得另起串流（否則前一個任務失去參照、無法取消）"""
+        release = asyncio.Event()
+        calls = []
+
+        async def blocking_stream(action, text):
+            calls.append(text)
+            await release.wait()
+            yield '完成'
+
+        with patch.object(ai_service, 'process_stream', blocking_stream), \
+                patch.object(ai_rate_limiter, 'is_allowed', return_value=True):
+            await consumer.receive(text_data=json.dumps({'type': 'ai_stream', 'action': 'summarize', 'text': '1'}))
+            first_task = consumer._ai_stream_task
+            await asyncio.sleep(0)
+            await consumer.receive(text_data=json.dumps({'type': 'ai_stream', 'action': 'summarize', 'text': '2'}))
+
+            assert consumer._ai_stream_task is first_task
+            release.set()
+            await first_task
+
+        assert calls == ['1']
+        messages = _sent(consumer)
+        assert {'type': 'ai_stream_error', 'message': '已有 AI 串流進行中，請稍候'} in messages
+        assert [m['type'] for m in messages].count('ai_stream_start') == 1

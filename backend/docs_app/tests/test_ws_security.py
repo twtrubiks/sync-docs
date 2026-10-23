@@ -15,6 +15,13 @@ from docs_app.rate_limiter import RateLimiter
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
+async def assert_closed_with(communicator, code):
+    """錯誤消息之後應以指定 close code 關閉（前端依 close code 決定重連 / 刷新 token / 停止）"""
+    message = await communicator.receive_output(timeout=2)
+    assert message['type'] == 'websocket.close'
+    assert message['code'] == code
+
+
 class TestAuthErrorResponse:
     """測試認證失敗原因回傳"""
 
@@ -36,6 +43,7 @@ class TestAuthErrorResponse:
         assert response['type'] == 'connection_error'
         assert response['error_code'] == 'TOKEN_EXPIRED'
         assert 'expired' in response['message'].lower()
+        await assert_closed_with(communicator, WSCloseCodes.TOKEN_EXPIRED)
 
         await communicator.disconnect()
 
@@ -55,6 +63,7 @@ class TestAuthErrorResponse:
         response = await communicator.receive_json_from(timeout=2)
         assert response['type'] == 'connection_error'
         assert response['error_code'] == 'INVALID_TOKEN'
+        await assert_closed_with(communicator, WSCloseCodes.AUTH_FAILED)
 
         await communicator.disconnect()
 
@@ -74,6 +83,7 @@ class TestAuthErrorResponse:
         response = await communicator.receive_json_from(timeout=2)
         assert response['type'] == 'connection_error'
         assert response['error_code'] == 'NO_TOKEN'
+        await assert_closed_with(communicator, WSCloseCodes.AUTH_FAILED)
 
         await communicator.disconnect()
 
@@ -94,6 +104,8 @@ class TestAuthErrorResponse:
         response = await communicator.receive_json_from(timeout=2)
         assert response['type'] == 'connection_error'
         assert response['error_code'] == 'PERMISSION_DENIED'
+        assert response['message'] == 'You do not have permission to access this document'
+        await assert_closed_with(communicator, WSCloseCodes.PERMISSION_DENIED)
 
         await communicator.disconnect()
 
@@ -114,6 +126,9 @@ class TestAuthErrorResponse:
         response = await communicator.receive_json_from(timeout=2)
         assert response['type'] == 'connection_error'
         assert response['error_code'] == 'DOCUMENT_NOT_FOUND'
+        # 前端會把 message 直接顯示給使用者
+        assert response['message'] == 'Document does not exist'
+        await assert_closed_with(communicator, WSCloseCodes.DOCUMENT_NOT_FOUND)
 
         await communicator.disconnect()
 
@@ -245,6 +260,7 @@ class TestConnectionLimit:
                 response = await comm3.receive_json_from(timeout=2)
                 assert response['type'] == 'connection_error'
                 assert response['error_code'] == 'TOO_MANY_CONNECTIONS'
+                await assert_closed_with(comm3, WSCloseCodes.TOO_MANY_CONNECTIONS)
                 communicators.append(comm3)
 
             finally:

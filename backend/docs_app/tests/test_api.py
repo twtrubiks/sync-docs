@@ -1,7 +1,7 @@
 import json
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
-from docs_app.models import Document
+from docs_app.models import Document, DocumentCollaborator, DocumentVersion, PermissionLevel
 
 # 使用 pytest-django 的 db fixture 來確保資料庫在測試之間是乾淨的
 pytestmark = pytest.mark.django_db
@@ -841,3 +841,217 @@ def test_document_response_includes_permission_fields(authenticated_client, crea
     assert response_data["permission"] == "owner"
     assert response_data["can_write"] == True
     assert response_data["is_owner"] == True
+
+
+# --- 權限旗標、擁有者專屬端點與回應格式（補強變異測試發現的缺口）---
+
+@pytest.fixture
+def owner_doc_with_collaborators(client, create_user):
+    """
+    擁有者文檔 + 一位 write 協作者 + 一位 read 協作者
+
+    回傳 dict：client、各角色 user 與 token、document
+    """
+    owner = create_user(username="docowner", email="docowner@example.com")
+    writer = create_user(username="docwriter", email="docwriter@example.com")
+    reader = create_user(username="docreader", email="docreader@example.com")
+    document = Document.objects.create(owner=owner, title="Owner Only Doc", content={"ops": [{"insert": "hi\n"}]})
+    DocumentCollaborator.objects.create(document=document, user=writer, permission=PermissionLevel.WRITE)
+    DocumentCollaborator.objects.create(document=document, user=reader, permission=PermissionLevel.READ)
+    return {
+        "client": client,
+        "document": document,
+        "owner": owner, "owner_token": get_user_token(client, owner),
+        "writer": writer, "writer_token": get_user_token(client, writer),
+        "reader": reader, "reader_token": get_user_token(client, reader),
+    }
+
+
+def test_get_document_permission_flags_per_role(owner_doc_with_collaborators):
+    """GET 單一文檔：is_owner / permission / can_write 依角色正確設定（前端據此顯示分享、刪除與編輯 UI）"""
+    ctx = owner_doc_with_collaborators
+    url = f"{DOCUMENTS_ENDPOINT}{ctx['document'].id}/"
+    expected = {
+        "owner_token": (True, "owner", True),
+        "writer_token": (False, "write", True),
+        "reader_token": (False, "read", False),
+    }
+    for token_key, (is_owner, permission, can_write) in expected.items():
+        data = ctx["client"].get(url, HTTP_AUTHORIZATION=f"Bearer {ctx[token_key]}").json()
+        assert (data["is_owner"], data["permission"], data["can_write"]) == (is_owner, permission, can_write), token_key
+
+
+def test_list_documents_permission_flags_mixed(owner_doc_with_collaborators):
+    """列表：自己擁有的與被分享的文檔各自帶正確的權限旗標"""
+    ctx = owner_doc_with_collaborators
+    client = ctx["client"]
+    own_doc = Document.objects.create(owner=ctx["reader"], title="Reader Own Doc", content={})
+
+    response = client.get(DOCUMENTS_ENDPOINT, HTTP_AUTHORIZATION=f"Bearer {ctx['reader_token']}")
+
+    assert response.status_code == 200
+    items = {item["id"]: item for item in response.json()["items"]}
+    assert len(items) == 2
+    own = items[str(own_doc.id)]
+    shared = items[str(ctx["document"].id)]
+    assert (own["is_owner"], own["permission"], own["can_write"]) == (True, "owner", True)
+    assert (shared["is_owner"], shared["permission"], shared["can_write"]) == (False, "read", False)
+
+
+def test_list_documents_write_collaborator_can_write(owner_doc_with_collaborators):
+    """列表：write 協作者看到被分享文檔 can_write=True、permission='write'"""
+    ctx = owner_doc_with_collaborators
+
+    response = ctx["client"].get(DOCUMENTS_ENDPOINT, HTTP_AUTHORIZATION=f"Bearer {ctx['writer_token']}")
+
+    [item] = response.json()["items"]
+    assert (item["is_owner"], item["permission"], item["can_write"]) == (False, "write", True)
+
+
+@pytest.mark.parametrize("method, path, payload", [
+    ("delete", "", None),
+    ("get", "collaborators/", None),
+    ("post", "collaborators/", {"username": "docreader", "permission": "write"}),
+    ("put", "collaborators/{reader_id}/", {"permission": "write"}),
+    ("delete", "collaborators/{reader_id}/", None),
+], ids=["delete-document", "list-collaborators", "add-collaborator", "update-permission", "remove-collaborator"])
+def test_write_collaborator_cannot_use_owner_only_endpoints(owner_doc_with_collaborators, method, path, payload):
+    """擁有者專屬端點：即使是 write 協作者也一律 404，且不得產生任何副作用"""
+    ctx = owner_doc_with_collaborators
+    document = ctx["document"]
+    url = f"{DOCUMENTS_ENDPOINT}{document.id}/" + path.format(reader_id=ctx["reader"].id)
+    kwargs = {"HTTP_AUTHORIZATION": f"Bearer {ctx['writer_token']}"}
+    if payload is not None:
+        kwargs.update(data=json.dumps(payload), content_type="application/json")
+
+    response = getattr(ctx["client"], method)(url, **kwargs)
+
+    assert response.status_code == 404, response.content.decode()
+    assert Document.objects.filter(id=document.id).exists()
+    reader_collab = DocumentCollaborator.objects.get(document=document, user=ctx["reader"])
+    assert reader_collab.permission == PermissionLevel.READ
+
+
+def test_owner_can_delete_document(owner_doc_with_collaborators):
+    """擁有者刪除文檔：回 success 且文檔（含協作關係）被刪除"""
+    ctx = owner_doc_with_collaborators
+    document_id = ctx["document"].id
+
+    response = ctx["client"].delete(f"{DOCUMENTS_ENDPOINT}{document_id}/",
+                                    HTTP_AUTHORIZATION=f"Bearer {ctx['owner_token']}")
+
+    assert response.status_code == 200
+    assert response.json() == {"success": True}
+    assert not Document.objects.filter(id=document_id).exists()
+    assert not DocumentCollaborator.objects.filter(document_id=document_id).exists()
+
+
+def test_get_nonexistent_document_returns_404(authenticated_client):
+    client, _, access_token = authenticated_client
+
+    response = client.get(f"{DOCUMENTS_ENDPOINT}00000000-0000-0000-0000-000000000000/",
+                          HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+    assert response.status_code == 404
+
+
+def test_create_document_without_content_defaults_to_empty_dict(authenticated_client):
+    """未帶 content 建立文檔：使用模型預設 {}，而不是寫入 null"""
+    client, _, access_token = authenticated_client
+
+    response = client.post(DOCUMENTS_ENDPOINT, data={"title": "No Content"},
+                           content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+    assert response.status_code == 201, response.content.decode()
+    assert response.json()["content"] == {}
+    assert Document.objects.get(id=response.json()["id"]).content == {}
+
+
+def test_collaborator_endpoints_include_email(owner_doc_with_collaborators, create_user):
+    """協作者相關回應都帶 email（分享對話框顯示用）"""
+    ctx = owner_doc_with_collaborators
+    client = ctx["client"]
+    auth = {"HTTP_AUTHORIZATION": f"Bearer {ctx['owner_token']}"}
+    base = f"{DOCUMENTS_ENDPOINT}{ctx['document'].id}/collaborators/"
+    newcomer = create_user(username="newcomer", email="newcomer@example.com")
+
+    listed = client.get(base, **auth).json()
+    assert {c["username"]: c["email"] for c in listed} == {
+        "docwriter": "docwriter@example.com",
+        "docreader": "docreader@example.com",
+    }
+
+    added = client.post(base, data=json.dumps({"username": "newcomer", "permission": "read"}),
+                        content_type="application/json", **auth)
+    assert added.status_code == 201
+    assert added.json() == {"id": newcomer.id, "username": "newcomer",
+                            "email": "newcomer@example.com", "permission": "read"}
+
+    updated = client.put(f"{base}{ctx['reader'].id}/", data=json.dumps({"permission": "write"}),
+                         content_type="application/json", **auth)
+    assert updated.json() == {"id": ctx["reader"].id, "username": "docreader",
+                              "email": "docreader@example.com", "permission": "write"}
+
+
+def test_reshare_existing_collaborator_persists_new_permission(owner_doc_with_collaborators):
+    """對既有協作者重新 POST：新權限必須寫入資料庫，而不只是出現在回應裡"""
+    ctx = owner_doc_with_collaborators
+
+    response = ctx["client"].post(
+        f"{DOCUMENTS_ENDPOINT}{ctx['document'].id}/collaborators/",
+        data=json.dumps({"username": "docreader", "permission": "write"}),
+        content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {ctx['owner_token']}",
+    )
+
+    assert response.status_code == 200
+    collab = DocumentCollaborator.objects.get(document=ctx["document"], user=ctx["reader"])
+    assert collab.permission == PermissionLevel.WRITE
+    assert DocumentCollaborator.objects.filter(document=ctx["document"]).count() == 2
+
+
+def test_remove_collaborator_returns_success(owner_doc_with_collaborators):
+    ctx = owner_doc_with_collaborators
+
+    response = ctx["client"].delete(
+        f"{DOCUMENTS_ENDPOINT}{ctx['document'].id}/collaborators/{ctx['reader'].id}/",
+        HTTP_AUTHORIZATION=f"Bearer {ctx['owner_token']}",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"success": True}
+
+
+def test_error_details_shown_to_users(owner_doc_with_collaborators):
+    """前端直接顯示 detail：自己分享給自己 / 只讀編輯的錯誤訊息須維持"""
+    ctx = owner_doc_with_collaborators
+    client = ctx["client"]
+    doc_url = f"{DOCUMENTS_ENDPOINT}{ctx['document'].id}/"
+
+    self_share = client.post(f"{doc_url}collaborators/", data=json.dumps({"username": "docowner"}),
+                             content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {ctx['owner_token']}")
+    assert self_share.status_code == 400
+    assert self_share.json()["detail"] == "You cannot share a document with yourself."
+
+    read_only_edit = client.put(doc_url, data={"title": "x"}, content_type="application/json",
+                                HTTP_AUTHORIZATION=f"Bearer {ctx['reader_token']}")
+    assert read_only_edit.status_code == 403
+    assert read_only_edit.json()["detail"] == "You do not have permission to edit this document"
+
+
+def test_update_document_keeps_at_most_50_versions(owner_doc_with_collaborators):
+    """內容變更自動建立版本後，只保留最新 50 個版本"""
+    ctx = owner_doc_with_collaborators
+    document = ctx["document"]
+    for _ in range(50):
+        DocumentVersion.create_version(document, ctx["owner"])
+
+    response = ctx["client"].put(f"{DOCUMENTS_ENDPOINT}{document.id}/",
+                                 data={"content": {"ops": [{"insert": "new\n"}]}},
+                                 content_type="application/json",
+                                 HTTP_AUTHORIZATION=f"Bearer {ctx['owner_token']}")
+
+    assert response.status_code == 200
+    numbers = list(DocumentVersion.objects.filter(document=document).values_list("version_number", flat=True))
+    assert len(numbers) == 50
+    assert min(numbers) == 2 and max(numbers) == 51

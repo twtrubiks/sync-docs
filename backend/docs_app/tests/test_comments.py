@@ -4,6 +4,7 @@
 包含 Model、Schema、API 和 WebSocket 的完整測試
 """
 import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from django.test import Client
@@ -530,3 +531,182 @@ class TestCommentAPI:
             f"/api/documents/{test_document.id}/comments/"
         )
         assert response.status_code == 401
+
+
+@pytest.fixture
+def mock_channel_layer():
+    """攔截評論 API 的 WebSocket 廣播"""
+    with patch('docs_app.comment_api.get_channel_layer') as mock_get_channel_layer:
+        layer = MagicMock()
+        layer.group_send = AsyncMock()
+        mock_get_channel_layer.return_value = layer
+        yield layer
+
+
+def _broadcast_event(layer, document):
+    layer.group_send.assert_called_once()
+    group_name, event = layer.group_send.call_args[0]
+    assert group_name == f"doc_{document.id}"
+    assert event["type"] == "comment_notification"
+    return event
+
+
+@pytest.mark.django_db
+class TestCommentAPIContracts:
+    """評論 API 的持久化、即時廣播 payload 與權限旗標（前端 CommentPanel 依賴這些欄位）"""
+
+    def test_create_comment_broadcasts_add_event(self, authenticated_client, test_document, mock_channel_layer):
+        client, user, token = authenticated_client
+
+        response = client.post(
+            f"/api/documents/{test_document.id}/comments/",
+            data={"content": "Hello"},
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["reply_count"] == 0
+        comment = Comment.objects.get(id=body["id"])
+        event = _broadcast_event(mock_channel_layer, test_document)
+        assert event["action"] == "add"
+        assert event["comment"] == {
+            "id": str(comment.id),
+            "content": "Hello",
+            "author_username": user.username,
+            "author_id": str(user.id),
+            "created_at": comment.created_at.isoformat(),
+            "updated_at": comment.updated_at.isoformat(),
+            "parent_id": None,
+            "reply_count": 0,
+        }
+
+    def test_create_reply_broadcasts_parent_id(self, authenticated_client, test_document, own_comment,
+                                               mock_channel_layer):
+        client, user, token = authenticated_client
+
+        response = client.post(
+            f"/api/documents/{test_document.id}/comments/",
+            data={"content": "Reply", "parent_id": str(own_comment.id)},
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+        assert response.status_code == 201
+        event = _broadcast_event(mock_channel_layer, test_document)
+        assert event["comment"]["parent_id"] == str(own_comment.id)
+
+    def test_update_comment_persists_and_broadcasts(self, authenticated_client, test_document, own_comment,
+                                                    mock_channel_layer):
+        client, user, token = authenticated_client
+
+        response = client.put(
+            f"/api/documents/{test_document.id}/comments/{own_comment.id}/",
+            data={"content": "Updated"},
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["is_author"] is True
+        assert body["can_delete"] is True
+        own_comment.refresh_from_db()
+        assert own_comment.content == "Updated", "編輯必須寫入資料庫"
+        event = _broadcast_event(mock_channel_layer, test_document)
+        assert event == {
+            "type": "comment_notification",
+            "action": "update",
+            "comment_id": str(own_comment.id),
+            "content": "Updated",
+            "updated_at": own_comment.updated_at.isoformat(),
+        }
+
+    def test_delete_comment_removes_and_broadcasts(self, authenticated_client, test_document, own_comment,
+                                                   mock_channel_layer):
+        client, user, token = authenticated_client
+
+        response = client.delete(
+            f"/api/documents/{test_document.id}/comments/{own_comment.id}/",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"success": True, "message": "評論已刪除"}
+        assert not Comment.objects.filter(id=own_comment.id).exists(), "刪除必須寫入資料庫"
+        event = _broadcast_event(mock_channel_layer, test_document)
+        assert event == {
+            "type": "comment_notification",
+            "action": "delete",
+            "comment_id": str(own_comment.id),
+            "parent_id": None,
+        }
+
+    def test_delete_reply_broadcasts_parent_id(self, authenticated_client, test_document, own_comment,
+                                               mock_channel_layer):
+        client, user, token = authenticated_client
+        reply = Comment.objects.create(document=test_document, author=user, content="r", parent=own_comment)
+
+        client.delete(
+            f"/api/documents/{test_document.id}/comments/{reply.id}/",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+        event = _broadcast_event(mock_channel_layer, test_document)
+        assert event["parent_id"] == str(own_comment.id)
+        assert Comment.objects.filter(id=own_comment.id).exists(), "刪除回覆不應連帶刪除父評論"
+
+    def test_list_replies_flags_per_viewer(self, owner_client, collaborator_client, test_document,
+                                           collaborators_comment, test_user, another_user):
+        """回覆的 is_author / can_delete：作者可刪、文件擁有者可刪任何回覆、其他協作者不可刪"""
+        owner_reply = Comment.objects.create(document=test_document, author=test_user, content="by owner",
+                                             parent=collaborators_comment)
+        collab_reply = Comment.objects.create(document=test_document, author=another_user, content="by collab",
+                                              parent=collaborators_comment)
+        url = f"/api/documents/{test_document.id}/comments/{collaborators_comment.id}/replies/"
+
+        def flags(client_tuple):
+            client, _, token = client_tuple
+            data = client.get(url, HTTP_AUTHORIZATION=f"Bearer {token}").json()
+            for item in data:
+                assert item["reply_count"] == 0
+                assert item["parent_id"] == str(collaborators_comment.id)
+            return {item["id"]: (item["is_author"], item["can_delete"]) for item in data}
+
+        assert flags(owner_client) == {
+            str(owner_reply.id): (True, True),
+            str(collab_reply.id): (False, True),
+        }
+        assert flags(collaborator_client) == {
+            str(owner_reply.id): (False, False),
+            str(collab_reply.id): (True, True),
+        }
+
+    def test_error_details_shown_to_users(self, authenticated_client, collaborator_client, readonly_client,
+                                          shared_document, read_only_shared_document, others_comment, test_user):
+        """前端直接顯示 detail：各種拒絕情境的錯誤訊息須維持"""
+        client, _, token = authenticated_client
+        auth = {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+        base = f"/api/documents/{shared_document.id}/comments/"
+
+        edit_others = client.put(f"{base}{others_comment.id}/", data={"content": "x"},
+                                 content_type="application/json", **auth)
+        assert (edit_others.status_code, edit_others.json()["detail"]) == (403, "只能編輯自己的評論")
+
+        owners_comment = Comment.objects.create(document=shared_document, author=test_user, content="owner")
+        c_client, _, c_token = collaborator_client
+        delete_others = c_client.delete(f"{base}{owners_comment.id}/", HTTP_AUTHORIZATION=f"Bearer {c_token}")
+        assert (delete_others.status_code, delete_others.json()["detail"]) == (403, "沒有刪除權限")
+
+        reply = Comment.objects.create(document=shared_document, author=test_user, content="r",
+                                       parent=owners_comment)
+        nested = client.post(base, data={"content": "x", "parent_id": str(reply.id)},
+                             content_type="application/json", **auth)
+        assert (nested.status_code, nested.json()["detail"]) == (400, "只能回覆頂層評論")
+
+        r_client, _, r_token = readonly_client
+        read_only = r_client.post(f"/api/documents/{read_only_shared_document.id}/comments/",
+                                  data={"content": "x"}, content_type="application/json",
+                                  HTTP_AUTHORIZATION=f"Bearer {r_token}")
+        assert (read_only.status_code, read_only.json()["detail"]) == (403, "沒有編輯權限")

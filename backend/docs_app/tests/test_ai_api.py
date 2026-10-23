@@ -6,8 +6,10 @@ AIService 行為測試以 TestModel / FunctionModel override agent，全程不�
 """
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock
 from django.test import override_settings
+from ninja_jwt.tokens import AccessToken
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ToolReturnPart, UserPromptPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from pydantic_ai.models.test import TestModel
@@ -15,13 +17,14 @@ from pydantic_ai.models.test import TestModel
 from docs_app import ai_service as ai_service_module
 from docs_app.ai_service import (
     AIService,
+    ai_service,
     _get_agent,
     _get_doc_agent,
     _get_metadata_agent,
     _get_model,
     _get_proofread_agent,
 )
-from docs_app.ai_rate_limiter import AIRateLimiter
+from docs_app.ai_rate_limiter import AIRateLimiter, ai_rate_limiter
 from docs_app.schemas import DocumentMetadata, ProofreadResult, WritingIssue
 
 # 使用 pytest-django 的 db fixture 來確保資料庫在測試之間是乾淨的
@@ -314,3 +317,190 @@ class TestAIRateLimiter:
 
             # 發生錯誤時應該返回 True（fail-open）
             assert result is True
+
+
+def _raising_model(exc):
+    """回傳一個無論一般 / 串流呼叫都拋出 exc 的 FunctionModel（模擬供應商錯誤）"""
+    def run(messages, info):
+        raise exc
+
+    async def stream(messages, info):
+        raise exc
+        yield  # pragma: no cover - 讓函數成為 async generator
+
+    return FunctionModel(function=run, stream_function=stream)
+
+
+async def _call_service(method):
+    """以一致介面呼叫四種 AIService 方法（串流方法會被完整迭代）"""
+    service = AIService()
+    if method == 'process_stream':
+        return [c async for c in service.process_stream('summarize', '文字')]
+    if method == 'ask_stream':
+        return [c async for c in service.ask_stream('問題', '文件內容')]
+    if method == 'proofread':
+        return await service.proofread('文字')
+    return await service.generate_metadata('文字')
+
+
+AGENT_GETTERS = {
+    'process_stream': _get_agent,
+    'ask_stream': _get_doc_agent,
+    'proofread': _get_proofread_agent,
+    'generate_metadata': _get_metadata_agent,
+}
+
+
+class TestAIServiceErrorHandling:
+    """供應商錯誤轉譯為使用者可讀的 RuntimeError（前端直接顯示這些訊息）"""
+
+    @pytest.mark.parametrize('method', list(AGENT_GETTERS))
+    @pytest.mark.parametrize('exc, expected', [
+        (ModelHTTPError(429, 'test-model'), 'API 配額已用盡，請稍後再試'),
+        (ModelHTTPError(500, 'test-model'), 'AI 服務暫時無法使用'),
+        (Exception('boom'), 'AI 處理失敗：boom'),
+    ], ids=['quota-429', 'http-500', 'unexpected'])
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_provider_errors_are_translated(self, method, exc, expected):
+        with AGENT_GETTERS[method]().override(model=_raising_model(exc)):
+            with pytest.raises(RuntimeError) as excinfo:
+                await _call_service(method)
+        assert str(excinfo.value) == expected
+
+    @override_settings(AI_PROVIDER='gemini', GOOGLE_API_KEY='', NVIDIA_API_KEY='nv-key')
+    async def test_gemini_requires_google_key(self):
+        """供應商為 gemini 時檢查的是 GOOGLE_API_KEY，而非 NVIDIA_API_KEY"""
+        with pytest.raises(RuntimeError, match='AI 服務未配置'):
+            await AIService().proofread('文字')
+
+    @pytest.mark.parametrize('method', ['proofread', 'generate_metadata'])
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_structured_input_truncated_to_5000_chars(self, method):
+        """校對 / 分析：超過 5000 字元只送前 5000 字並加省略號"""
+        captured = {}
+
+        def capture(messages, info):
+            for message in messages:
+                for part in message.parts:
+                    if isinstance(part, UserPromptPart):
+                        captured['prompt'] = str(part.content)
+            raise RuntimeError('stop after capture')
+
+        with AGENT_GETTERS[method]().override(model=FunctionModel(function=capture)):
+            with pytest.raises(RuntimeError):
+                await getattr(AIService(), method)('A' * 5000 + 'B' * 10)
+
+        assert captured['prompt'] == 'A' * 5000 + '...'
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_structured_input_at_limit_not_truncated(self):
+        """剛好 5000 字元不截斷（邊界）"""
+        captured = {}
+
+        def capture(messages, info):
+            for message in messages:
+                for part in message.parts:
+                    if isinstance(part, UserPromptPart):
+                        captured['prompt'] = str(part.content)
+            raise RuntimeError('stop after capture')
+
+        with _get_proofread_agent().override(model=FunctionModel(function=capture)):
+            with pytest.raises(RuntimeError):
+                await AIService().proofread('A' * 5000)
+
+        assert captured['prompt'] == 'A' * 5000
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_ask_stream_document_truncated_to_5000_chars(self):
+        """文件問答：注入給工具的文件超過 5000 字元會截斷"""
+        captured = {}
+
+        async def fake_stream(messages, info):
+            for message in messages:
+                for part in message.parts:
+                    if isinstance(part, ToolReturnPart):
+                        captured['doc'] = str(part.content)
+                        yield '答'
+                        return
+            yield {0: DeltaToolCall(name='get_document_text', json_args='{}', tool_call_id='c1')}
+
+        with _get_doc_agent().override(model=FunctionModel(stream_function=fake_stream)):
+            [c async for c in AIService().ask_stream('問題', 'A' * 5000 + 'B')]
+
+        assert captured['doc'] == 'A' * 5000 + '...'
+
+    @override_settings(AI_PROVIDER='nvidia', NVIDIA_API_KEY='test-key')
+    async def test_process_stream_truncation_keeps_exactly_5000_chars(self):
+        """摘要 / 潤稿：截斷後保留前 5000 字（不多不少）"""
+        captured = {}
+
+        async def capture_stream(messages, info):
+            for message in messages:
+                for part in message.parts:
+                    if isinstance(part, UserPromptPart):
+                        captured['prompt'] = str(part.content)
+            yield '結果'
+
+        with _get_agent().override(model=FunctionModel(stream_function=capture_stream)):
+            [c async for c in AIService().process_stream('polish', 'A' * 5000 + 'B')]
+
+        assert 'A' * 5000 + '...' in captured['prompt']
+        assert 'A' * 5001 not in captured['prompt']
+        assert 'B' not in captured['prompt']
+
+
+class TestAIController:
+    """AI HTTP 端點（校對 / 文件分析）：認證、與串流共用的額度、錯誤回應格式"""
+
+    ENDPOINTS = [
+        ('/api/ai/proofread', 'proofread',
+         ProofreadResult(issues=[WritingIssue(original='錯', suggestion='對', reason='錯字', severity='error')],
+                         overall_score=80)),
+        ('/api/ai/metadata', 'generate_metadata',
+         DocumentMetadata(summary='摘要', tags=['a', 'b', 'c'], language='zh-Hant', reading_time=3)),
+    ]
+
+    @pytest.fixture
+    def auth_headers(self, test_user):
+        return {'HTTP_AUTHORIZATION': f'Bearer {AccessToken.for_user(test_user)}'}
+
+    @pytest.mark.parametrize('url, method, result', ENDPOINTS, ids=['proofread', 'metadata'])
+    def test_success_returns_structured_result(self, client, auth_headers, test_user, url, method, result):
+        with patch.object(ai_rate_limiter, 'is_allowed', return_value=True) as limiter, \
+                patch.object(ai_service, method, AsyncMock(return_value=result)) as service_call:
+            response = client.post(url, data={'text': '一段文字'}, content_type='application/json', **auth_headers)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body['success'] is True
+        assert body['error'] is None
+        assert body['result'] == result.model_dump()
+        service_call.assert_awaited_once_with('一段文字')
+        # 與 WebSocket 串流共用同一額度鍵與上限
+        limiter.assert_called_once_with(f'ai:{test_user.id}', 10, 60)
+
+    @pytest.mark.parametrize('url, method, result', ENDPOINTS, ids=['proofread', 'metadata'])
+    def test_rate_limited_does_not_call_service(self, client, auth_headers, url, method, result):
+        with patch.object(ai_rate_limiter, 'is_allowed', return_value=False), \
+                patch.object(ai_service, method, AsyncMock(return_value=result)) as service_call:
+            response = client.post(url, data={'text': '一段文字'}, content_type='application/json', **auth_headers)
+
+        assert response.status_code == 200
+        assert response.json() == {'success': False, 'result': None, 'error': '請求過於頻繁，請稍後再試'}
+        service_call.assert_not_called()
+
+    @pytest.mark.parametrize('url, method, result', ENDPOINTS, ids=['proofread', 'metadata'])
+    @pytest.mark.parametrize('exc', [ValueError('Text cannot be empty'), RuntimeError('AI 服務未配置')],
+                             ids=['value-error', 'runtime-error'])
+    def test_service_errors_become_error_response(self, client, auth_headers, url, method, result, exc):
+        with patch.object(ai_rate_limiter, 'is_allowed', return_value=True), \
+                patch.object(ai_service, method, AsyncMock(side_effect=exc)):
+            response = client.post(url, data={'text': ''}, content_type='application/json', **auth_headers)
+
+        assert response.status_code == 200
+        assert response.json() == {'success': False, 'result': None, 'error': str(exc)}
+
+    @pytest.mark.parametrize('url', ['/api/ai/proofread', '/api/ai/metadata'])
+    def test_requires_authentication(self, client, url):
+        response = client.post(url, data={'text': '文字'}, content_type='application/json')
+        assert response.status_code == 401
