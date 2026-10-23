@@ -732,6 +732,15 @@ class TestRateLimiterSlidingWindow:
 
         assert [allowed for allowed, _ in results].count(True) == 3
 
+    async def test_warns_only_when_blocking(self, limiter, clock):
+        with patch('docs_app.rate_limiter.logger') as logger:
+            for t in (1_000_000.0, 1_000_000.1, 1_000_000.2):
+                await self._send(limiter, clock, t)
+            logger.warning.assert_not_called()
+
+            await self._send(limiter, clock, 1_000_000.3)
+            logger.warning.assert_called_once()
+
     async def test_key_expires_shortly_after_window(self, limiter, clock, redis_client):
         await self._send(limiter, clock, 1_000_000.0)
 

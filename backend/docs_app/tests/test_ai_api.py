@@ -308,6 +308,17 @@ class TestAIRateLimiter:
 
             assert result is False
 
+    def test_warns_only_when_blocking(self):
+        with patch.object(AIRateLimiter, '_get_redis') as mock_redis, \
+                patch('docs_app.ai_rate_limiter.logger') as logger:
+            mock_redis.return_value.eval.return_value = 1
+            AIRateLimiter().is_allowed('test_key', 10, 60)
+            logger.warning.assert_not_called()
+
+            mock_redis.return_value.eval.return_value = 0
+            AIRateLimiter().is_allowed('test_key', 10, 60)
+            logger.warning.assert_called_once()
+
     def test_is_allowed_fail_open_on_error(self):
         """測試發生錯誤時允許通過（fail-open）"""
         with patch.object(AIRateLimiter, '_get_redis') as mock_redis:
