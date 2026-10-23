@@ -445,6 +445,15 @@ describe('VersionHistoryPanel', () => {
 		});
 	});
 
+	it('shows a loading state until versions arrive', async () => {
+		vi.mocked(getVersions).mockReturnValue(new Promise(() => {}));
+
+		render(VersionHistoryPanel, { props: { documentId: 'doc-123', isOpen: true } });
+
+		expect(await screen.findByText('載入中...')).toBeInTheDocument();
+		expect(screen.queryByText('尚無版本記錄')).toBeNull();
+	});
+
 	describe('loading more', () => {
 		it('disables the button while loading and loads each page once', async () => {
 			const next = deferred<ReturnType<typeof olderPage>>();

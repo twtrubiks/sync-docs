@@ -551,12 +551,12 @@ describe('Document Page - WebSocket protocol', () => {
 			]
 		});
 		const alice = await screen.findByTitle('alice');
-		expect(alice).toHaveTextContent('A');
+		expect(alice).toHaveTextContent(/^A$/);
 		expect(alice).toHaveStyle({ backgroundColor: '#222222' });
 		expect(screen.queryByTitle('me')).toBeNull();
 
 		receive(ws, { type: 'user_join', user_id: '3', username: 'bob', color: '#333333' });
-		expect(await screen.findByTitle('bob')).toHaveTextContent('B');
+		expect(await screen.findByTitle('bob')).toHaveTextContent(/^B$/);
 
 		receive(ws, { type: 'user_leave', user_id: '2' });
 		await waitFor(() => expect(screen.queryByTitle('alice')).toBeNull());
@@ -581,7 +581,8 @@ describe('Document Page - WebSocket protocol', () => {
 			'error',
 			'Invalid JSON format'
 		],
-		[{ error_code: 'UNKNOWN' }, 'error', 'An error occurred.']
+		[{ error_code: 'UNKNOWN' }, 'error', 'An error occurred.'],
+		[{ error_code: 'RATE_LIMITED', message: 'Slow down' }, 'error', 'Slow down']
 	])('runtime error %o is shown as %s', async (payload, level, expected) => {
 		const ws = await connect();
 
@@ -1267,6 +1268,7 @@ describe('Document Page - edit state, socket guards and cleanup', () => {
 	function quill() {
 		return harness.props.QuillEditor as {
 			value: unknown;
+			disabled: boolean;
 			onTextChange: (d: { delta: unknown; source: string }) => void;
 			onSelectionChange: (r: { index: number; length: number } | null) => void;
 		};
@@ -1293,6 +1295,7 @@ describe('Document Page - edit state, socket guards and cleanup', () => {
 	describe('loading', () => {
 		it('hands the loaded content to the editor, or an empty delta when there is none', async () => {
 			await ready();
+			expect(get).toHaveBeenCalledWith('/documents/test-doc-123/');
 			expect(quill().value).toEqual(mockDoc.content);
 
 			const { content: _ignored, ...withoutContent } = mockDoc;
@@ -1354,13 +1357,15 @@ describe('Document Page - edit state, socket guards and cleanup', () => {
 			expect(harness.props.CommentPanel.documentId).toBe('test-doc-123');
 		});
 
-		it('disables the AI writing assistant for read-only users', async () => {
+		it('disables the editor and the AI writing assistant for read-only users', async () => {
 			const { ws } = await ready();
 			expect(screen.getByTitle('AI Writing Assistant')).not.toBeDisabled();
+			expect(quill().disabled).toBe(false);
 
 			receive(ws, { type: 'permission_update', can_write: false });
 
 			await waitFor(() => expect(screen.getByTitle('AI Writing Assistant')).toBeDisabled());
+			expect(quill().disabled).toBe(true);
 		});
 
 		it('tells version history how many other people are online', async () => {
@@ -1457,6 +1462,21 @@ describe('Document Page - edit state, socket guards and cleanup', () => {
 
 			unmount();
 
+			expect(ws.send).toHaveBeenCalledTimes(1);
+		});
+
+		it('leaving after the connection dropped neither crashes nor reconnects', async () => {
+			vi.spyOn(Math, 'random').mockReturnValue(0);
+			const { ws, unmount } = await ready();
+			vi.useFakeTimers();
+			type('a');
+			type('b'); // 節流中，尚未送出
+			ws.onclose!({ code: 1006, reason: '' }); // 斷線並排程 1 秒後重連
+
+			unmount();
+			await vi.advanceTimersByTimeAsync(60000);
+
+			expect(globalThis.WebSocket).toHaveBeenCalledTimes(1);
 			expect(ws.send).toHaveBeenCalledTimes(1);
 		});
 	});
@@ -1773,6 +1793,7 @@ describe('Document Page - edit state, socket guards and cleanup', () => {
 			vi.useFakeTimers();
 
 			await restore();
+			expect(get).toHaveBeenLastCalledWith('/documents/test-doc-123/');
 			await vi.advanceTimersByTimeAsync(1999);
 			expect(status()).toBe('All changes saved');
 			await vi.advanceTimersByTimeAsync(1);
@@ -1895,6 +1916,28 @@ describe('Document Page - share modal details', () => {
 			expect(screen.getByLabelText('Change permission for alice')).toBeInTheDocument();
 		}
 	);
+
+	it('adds collaborators with edit permission by default', async () => {
+		vi.mocked(post).mockResolvedValue({
+			id: 4,
+			username: 'carol',
+			email: null,
+			permission: 'write'
+		});
+		await openShare();
+
+		await fireEvent.input(screen.getByPlaceholderText('Enter username'), {
+			target: { value: 'carol' }
+		});
+		await fireEvent.click(screen.getByText('Add'));
+
+		await waitFor(() =>
+			expect(post).toHaveBeenCalledWith('/documents/test-doc-123/collaborators/', {
+				username: 'carol',
+				permission: 'write'
+			})
+		);
+	});
 
 	it('shows a generic message when adding fails without an Error', async () => {
 		vi.mocked(post).mockRejectedValue('nope');

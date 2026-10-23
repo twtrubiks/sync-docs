@@ -506,9 +506,15 @@ describe('AIDialog', () => {
 			);
 			render(AIDialog, { props: streamProps({ selectedText: '錯字', onApply }) });
 			await fireEvent.click(screen.getByText('校對'));
-			await fireEvent.click(await screen.findByText('套用'));
+			const applyAll = (await screen.findByText('套用變更到文件')).closest('button')!;
 
-			await fireEvent.click(screen.getByText('套用變更到文件'));
+			// 尚未套用任何建議：沒有可寫回的變更
+			await fireEvent.click(applyAll);
+			expect(onApply).not.toHaveBeenCalled();
+
+			await fireEvent.click(screen.getByText('套用'));
+			expect(applyAll).not.toBeDisabled();
+			await fireEvent.click(applyAll);
 
 			expect(onApply).toHaveBeenCalledWith('對字');
 			expect(screen.queryByText('AI 寫作助手')).toBeNull();

@@ -85,6 +85,15 @@ describe('CommentPanel', () => {
 			expect(screen.getByRole('heading', { name: '評論 (2)' })).toBeInTheDocument();
 		});
 
+		it('shows a loading state until the first page arrives', async () => {
+			vi.mocked(getComments).mockReturnValue(new Promise(() => {}));
+
+			render(CommentPanel, { props: defaultProps });
+
+			expect(await screen.findByText('載入中...')).toBeInTheDocument();
+			expect(screen.queryByText('尚無評論')).toBeNull();
+		});
+
 		it('does not load while closed', () => {
 			render(CommentPanel, { props: { ...defaultProps, isOpen: false } });
 
@@ -177,6 +186,8 @@ describe('CommentPanel', () => {
 			});
 
 			expect(screen.getByText('發送評論').closest('button')).toBeDisabled();
+			await fireEvent.click(screen.getByText('發送評論'));
+			expect(createComment).not.toHaveBeenCalled();
 		});
 
 		it('does not duplicate a comment already added by the WebSocket broadcast', async () => {
@@ -576,6 +587,14 @@ describe('CommentPanel', () => {
 
 			expect((screen.getByPlaceholderText('輸入回覆...') as HTMLTextAreaElement).value).toBe('');
 			expect(screen.getByText('發送').closest('button')).toBeDisabled();
+
+			// 只有空白的回覆同樣不能送出
+			await fireEvent.input(screen.getByPlaceholderText('輸入回覆...'), {
+				target: { value: '   ' }
+			});
+			expect(screen.getByText('發送').closest('button')).toBeDisabled();
+			await fireEvent.click(screen.getByText('發送'));
+			expect(createComment).not.toHaveBeenCalled();
 		});
 
 		it('updates only the edited comment', async () => {
@@ -709,7 +728,7 @@ describe('CommentPanel', () => {
 			await waitFor(() => expect(toggle.querySelector('.animate-spin')).toBeNull());
 		});
 
-		it('adds live replies to an expanded thread once', async () => {
+		it('adds live replies to an expanded thread once, with their time', async () => {
 			const { component } = await renderPanel();
 			await expandReplies();
 
@@ -718,6 +737,13 @@ describe('CommentPanel', () => {
 
 			await screen.findByText('Live reply');
 			expect(screen.getAllByText('Live reply')).toHaveLength(1);
+			const time = new Date(wsReply.created_at).toLocaleString('zh-TW', {
+				month: 'short',
+				day: 'numeric',
+				hour: '2-digit',
+				minute: '2-digit'
+			});
+			expect(screen.getByText(time)).toBeInTheDocument();
 		});
 
 		it('does not duplicate a reply the broadcast already added', async () => {
@@ -842,13 +868,19 @@ describe('CommentPanel', () => {
 			expect(screen.getByText('First comment')).toBeInTheDocument();
 		});
 
-		it('decrements the reply count of a collapsed thread', async () => {
-			vi.mocked(getComments).mockResolvedValue(page([makeComment({ reply_count: 2 })]));
+		it('decrements the reply count of a collapsed thread only', async () => {
+			vi.mocked(getComments).mockResolvedValue(
+				page([
+					makeComment({ reply_count: 2 }),
+					makeComment({ id: 'c2', content: 'Second', reply_count: 3 })
+				])
+			);
 			const { component } = await renderPanel();
 
 			component.removeCommentFromWS('r1', 'c1');
 
 			expect(await screen.findByText('1 則回覆')).toBeInTheDocument();
+			expect(screen.getByText('3 則回覆')).toBeInTheDocument();
 		});
 	});
 });
