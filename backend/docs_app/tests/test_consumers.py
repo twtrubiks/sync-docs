@@ -915,6 +915,14 @@ class TestPresenceStorage:
         assert 290 < ttl <= 300
 
 
+async def _wait_until(predicate, timeout=2.0):
+    """輪詢直到條件成立（避免固定 sleep 在高負載下不穩定）"""
+    async def poll():
+        while not predicate():
+            await asyncio.sleep(0.005)
+    await asyncio.wait_for(poll(), timeout)
+
+
 class TestHeartbeat:
 
     async def test_heartbeat_refreshes_connection_and_presence(self, test_user, test_document):
@@ -925,7 +933,7 @@ class TestHeartbeat:
                 patch('docs_app.consumers.connection_manager.refresh_connection',
                       new_callable=AsyncMock) as refresh_connection:
             task = asyncio.create_task(consumer._heartbeat_loop())
-            await asyncio.sleep(0.05)
+            await _wait_until(lambda: consumer.refresh_presence_ttl.await_count >= 1)
             task.cancel()
             await task  # CancelledError 在 loop 內被吞掉，正常結束
 
@@ -946,8 +954,9 @@ class TestHeartbeat:
         with patch('docs_app.consumers.HEARTBEAT_INTERVAL', 0.01), \
                 patch('docs_app.consumers.connection_manager.refresh_connection', flaky_refresh):
             task = asyncio.create_task(consumer._heartbeat_loop())
-            await asyncio.sleep(0.05)
+            # 第一次刷新失敗後，心跳仍須繼續下一輪
+            await _wait_until(lambda: len(calls) >= 2)
             task.cancel()
             await task
 
-        assert len(calls) >= 2
+        assert consumer.refresh_presence_ttl.await_count >= 1
