@@ -185,8 +185,9 @@ describe('CommentPanel', () => {
 				target: { value: '   ' }
 			});
 
-			expect(screen.getByText('發送評論').closest('button')).toBeDisabled();
-			await fireEvent.click(screen.getByText('發送評論'));
+			const send = screen.getByText('發送評論').closest('button')!;
+			expect(send).toBeDisabled();
+			await fireEvent.click(send);
 			expect(createComment).not.toHaveBeenCalled();
 		});
 
