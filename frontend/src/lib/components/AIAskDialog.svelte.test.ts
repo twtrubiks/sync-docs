@@ -99,4 +99,58 @@ describe('AIAskDialog', () => {
 		await fireEvent.click(stopButton);
 		expect(onCancelStream).toHaveBeenCalled();
 	});
+	// ── 變異測試補強 ──
+
+	it('keeps 送出 disabled for whitespace questions and while streaming', async () => {
+		const { rerender } = render(AIAskDialog, {
+			props: { isOpen: true, documentText: '文件', onAsk: vi.fn(() => true) }
+		});
+		const textarea = screen.getByPlaceholderText('例如：這份文件的重點是什麼？');
+		const send = () => screen.getByText('送出').closest('button');
+
+		await fireEvent.input(textarea, { target: { value: '   ' } });
+		expect(send()).toBeDisabled();
+
+		await fireEvent.input(textarea, { target: { value: '重點？' } });
+		expect(send()).not.toBeDisabled();
+
+		await rerender({
+			isOpen: true,
+			documentText: '文件',
+			onAsk: vi.fn(() => true),
+			streaming: true
+		});
+		expect(send()).toBeDisabled();
+	});
+
+	it('shows the answer instead of the spinner once text streams in', () => {
+		render(AIAskDialog, {
+			props: { isOpen: true, documentText: '文件', streaming: true, streamText: '部分答案' }
+		});
+
+		expect(screen.getByText(/部分答案/)).toBeInTheDocument();
+		expect(screen.queryByText('AI 回答中...')).toBeNull();
+	});
+
+	it('closing while streaming cancels it and clears the question', async () => {
+		const onCancelStream = vi.fn();
+		render(AIAskDialog, {
+			props: { isOpen: true, documentText: '文件', streaming: true, onCancelStream }
+		});
+
+		await fireEvent.keyDown(window, { key: 'Escape' });
+
+		expect(onCancelStream).toHaveBeenCalledTimes(1);
+		expect(screen.queryByText('文件問答')).toBeNull();
+	});
+
+	it('closing when idle does not cancel anything', async () => {
+		const onCancelStream = vi.fn();
+		render(AIAskDialog, { props: { isOpen: true, documentText: '文件', onCancelStream } });
+
+		await fireEvent.click(screen.getByLabelText('Close dialog'));
+
+		expect(onCancelStream).not.toHaveBeenCalled();
+		expect(screen.queryByText('文件問答')).toBeNull();
+	});
 });

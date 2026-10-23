@@ -143,4 +143,36 @@ describe('ConfirmDialog', () => {
 		await fireEvent.click(closeBtn);
 		expect(onCancel).toHaveBeenCalledOnce();
 	});
+	// ── 變異測試補強 ──
+
+	it('uses the default title and message', () => {
+		render(ConfirmDialog, { props: { isOpen: true } });
+
+		expect(screen.getByText('確認操作')).toBeInTheDocument();
+		expect(screen.getByText('確定要執行此操作嗎？')).toBeInTheDocument();
+	});
+
+	it('closes itself after confirming or cancelling', async () => {
+		render(ConfirmDialog, { props: { isOpen: true } });
+		await fireEvent.click(screen.getByText('確認'));
+		expect(screen.queryByRole('alertdialog')).toBeNull();
+
+		document.body.innerHTML = '';
+		render(ConfirmDialog, { props: { isOpen: true } });
+		await fireEvent.click(screen.getByText('取消'));
+		expect(screen.queryByRole('alertdialog')).toBeNull();
+	});
+
+	it('ignores Escape while closed and other keys while open', async () => {
+		const onCancel = vi.fn();
+		const { rerender } = render(ConfirmDialog, { props: { isOpen: false, onCancel } });
+
+		await fireEvent.keyDown(window, { key: 'Escape' });
+		expect(onCancel).not.toHaveBeenCalled();
+
+		await rerender({ isOpen: true, onCancel });
+		await fireEvent.keyDown(window, { key: 'Enter' });
+		expect(onCancel).not.toHaveBeenCalled();
+		expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+	});
 });

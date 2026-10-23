@@ -88,4 +88,47 @@ describe('AIMetadataDialog', () => {
 			expect(toastError).toHaveBeenCalledWith('Metadata error');
 		});
 	});
+	// ── 變異測試補強 ──
+
+	it('does not analyze an empty document', async () => {
+		render(AIMetadataDialog, { props: { isOpen: true, documentText: '   ' } });
+
+		await Promise.resolve();
+		expect(metadataWithAI).not.toHaveBeenCalled();
+	});
+
+	it('analyzes once per document content, even when reopened', async () => {
+		vi.mocked(metadataWithAI).mockResolvedValue({
+			success: true,
+			result: { summary: '摘要', tags: [], language: 'zh-Hant', reading_time: 1 }
+		});
+		const { rerender } = render(AIMetadataDialog, {
+			props: { isOpen: true, documentText: '內容 A' }
+		});
+		await waitFor(() => expect(metadataWithAI).toHaveBeenCalledTimes(1));
+
+		await rerender({ isOpen: false, documentText: '內容 A' });
+		await rerender({ isOpen: true, documentText: '內容 A' });
+		expect(metadataWithAI).toHaveBeenCalledTimes(1);
+
+		await rerender({ isOpen: true, documentText: '內容 B' });
+		await waitFor(() => expect(metadataWithAI).toHaveBeenCalledTimes(2));
+		expect(metadataWithAI).toHaveBeenLastCalledWith('內容 B');
+	});
+
+	it('shows a loading state while analyzing', async () => {
+		vi.mocked(metadataWithAI).mockImplementation(() => new Promise(() => {}));
+
+		render(AIMetadataDialog, { props: { isOpen: true, documentText: '內容' } });
+
+		expect(await screen.findByText(/分析中/)).toBeInTheDocument();
+	});
+
+	it('treats a success response without result as a failure', async () => {
+		vi.mocked(metadataWithAI).mockResolvedValue({ success: true });
+
+		render(AIMetadataDialog, { props: { isOpen: true, documentText: '內容' } });
+
+		await waitFor(() => expect(toastError).toHaveBeenCalledWith('AI 文件分析失敗'));
+	});
 });

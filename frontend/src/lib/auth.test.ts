@@ -36,6 +36,7 @@ vi.stubGlobal('fetch', mockFetch);
 import {
 	token,
 	refreshToken,
+	isAuthenticated,
 	user,
 	logout,
 	refreshAccessToken,
@@ -393,6 +394,102 @@ describe('auth', () => {
 
 			expect(result).toBeNull();
 			expect(mockFetch).not.toHaveBeenCalled();
+		});
+	});
+	// ── 變異測試補強 ──
+
+	describe('edge cases', () => {
+		it('syncs refresh token to localStorage on set and clear', () => {
+			refreshToken.set('r-1');
+			expect(mockStorage.setItem).toHaveBeenCalledWith('refresh_token', 'r-1');
+
+			refreshToken.set(null);
+			expect(mockStorage.removeItem).toHaveBeenCalledWith('refresh_token');
+		});
+
+		it('isAuthenticated follows the access token', () => {
+			expect(storeGet(isAuthenticated)).toBe(false);
+			token.set('abc');
+			expect(storeGet(isAuthenticated)).toBe(true);
+		});
+
+		it('refresh rejected by the server keeps the current token', async () => {
+			// 真實的 401 會帶 JSON body（例如黑名單），不可當成成功
+			setStorage('refresh_token', 'blacklisted');
+			token.set('old-access');
+			vi.clearAllMocks();
+			mockFetch.mockResolvedValueOnce(
+				createResponse({ detail: 'Token is blacklisted', code: 'token_not_valid' }, 401)
+			);
+
+			const success = await refreshAccessToken();
+
+			expect(success).toBe(false);
+			expect(storeGet(token)).toBe('old-access');
+		});
+
+		it('omits the Authorization header when there is no token', async () => {
+			mockFetch.mockResolvedValueOnce(createResponse({ ok: true }));
+
+			await apiGet('/public');
+
+			const [, options] = mockFetch.mock.calls[0];
+			expect(options.headers.has('Authorization')).toBe(false);
+		});
+
+		it('returns null for 204 without reading the body', async () => {
+			setupAuth();
+			const response = createResponse(null, 204);
+			response.json.mockRejectedValue(new Error('no body'));
+			mockFetch.mockResolvedValueOnce(response);
+
+			await expect(apiDel('/items/1')).resolves.toBeNull();
+			expect(response.json).not.toHaveBeenCalled();
+		});
+
+		it('joins only validation entries that carry a message', async () => {
+			setupAuth();
+			mockFetch.mockResolvedValueOnce(
+				createResponse({ detail: [{ msg: 'first' }, { loc: ['x'] }, { msg: 'second' }] }, 422)
+			);
+
+			await expect(apiPost('/validate', {})).rejects.toThrow(/^first; second$/);
+		});
+
+		it.each([
+			['empty detail list', { detail: [], message: 'fallback message' }, 'fallback message'],
+			[
+				'detail without msg',
+				{ detail: [{ loc: ['x'] }], message: 'fallback message' },
+				'fallback message'
+			],
+			['top-level message', { message: 'plain message' }, 'plain message'],
+			['unknown shape', { error: 'x' }, 'API request failed: Bad Request']
+		])('falls back correctly for %s', async (_name, body, expected) => {
+			setupAuth();
+			mockFetch.mockResolvedValueOnce(createResponse(body, 400, 'Bad Request'));
+
+			await expect(apiGet('/bad')).rejects.toThrow(new RegExp(`^${expected}$`));
+		});
+
+		it('fetchCurrentUser clears a stale user when there is no token', async () => {
+			user.set({ id: 1, username: 'stale', email: null });
+
+			await fetchCurrentUser();
+
+			expect(storeGet(user)).toBeNull();
+		});
+
+		it('fetchCurrentUser calls /auth/me and clears the user on failure', async () => {
+			setupAuth();
+			user.set({ id: 1, username: 'stale', email: null });
+			mockFetch.mockResolvedValueOnce(createResponse({ detail: 'boom' }, 500, 'Server Error'));
+
+			const result = await fetchCurrentUser();
+
+			expect(mockFetch.mock.calls[0][0]).toBe('/api/auth/me');
+			expect(result).toBeNull();
+			expect(storeGet(user)).toBeNull();
 		});
 	});
 });

@@ -61,8 +61,16 @@ function createMockComponent() {
 	return function MockComponent() {};
 }
 
+// QuillEditor 以 bind:this 取得實例並呼叫游標方法；mock 元件回傳的 exports 即為該實例
+const quillEditorExports = vi.hoisted(() => ({
+	setCursor: vi.fn(),
+	removeCursor: vi.fn()
+}));
+
 vi.mock('$lib/components/QuillEditor.svelte', () => ({
-	default: createMockComponent()
+	default: function MockQuillEditor() {
+		return quillEditorExports;
+	}
 }));
 
 vi.mock('$lib/components/VersionHistoryPanel.svelte', () => ({
@@ -87,8 +95,8 @@ vi.mock('$lib/components/CommentPanel.svelte', () => ({
 
 // Import after mocks
 import Page from './+page.svelte';
-import { get, put } from '$lib/auth';
-import { toastError, toastSuccess } from '$lib/toast';
+import { get, put, logout, refreshAccessToken } from '$lib/auth';
+import { toastError, toastSuccess, toastWarning } from '$lib/toast';
 import { goto } from '$app/navigation';
 
 // Mock document data
@@ -387,5 +395,400 @@ describe('Document Page - WebSocket close handling', () => {
 
 		expect(toastError).toHaveBeenCalledWith('Your access to this document has been removed');
 		expect(goto).toHaveBeenCalledWith('/dashboard');
+	});
+});
+
+describe('Document Page - WebSocket protocol', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		setupBrowserMocks();
+		vi.mocked(get).mockResolvedValue(mockDoc);
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+	});
+
+	function sockets(): MockWebSocket[] {
+		return vi.mocked(globalThis.WebSocket).mock.instances as unknown as MockWebSocket[];
+	}
+
+	async function connect(): Promise<MockWebSocket> {
+		render(Page);
+		await waitFor(() => expect(globalThis.WebSocket).toHaveBeenCalled());
+		const ws = sockets().at(-1)!;
+		ws.onopen!({});
+		return ws;
+	}
+
+	function receive(ws: MockWebSocket, data: Record<string, unknown>) {
+		ws.onmessage!({ data: JSON.stringify(data) });
+	}
+
+	it('opens the socket with the access token as a subprotocol', async () => {
+		await connect();
+
+		expect(globalThis.WebSocket).toHaveBeenCalledWith(
+			`ws://${window.location.host}/ws/docs/test-doc-123/`,
+			['access_token.mock-token']
+		);
+	});
+
+	it('applies can_write from connection_success', async () => {
+		const ws = await connect();
+		expect(screen.queryByText('View Only')).toBeNull();
+
+		receive(ws, { type: 'connection_success', can_write: false, user_id: '1' });
+
+		expect(await screen.findByText('View Only')).toBeInTheDocument();
+		expect(screen.getByPlaceholderText('Untitled Document')).toBeDisabled();
+	});
+
+	it('permission_update notifies about promotion and demotion', async () => {
+		const ws = await connect();
+
+		receive(ws, { type: 'permission_update', can_write: false });
+		expect(toastWarning).toHaveBeenCalledWith('Your access has been changed to read-only.');
+		expect(await screen.findByText('View Only')).toBeInTheDocument();
+
+		receive(ws, { type: 'permission_update', can_write: true });
+		expect(toastSuccess).toHaveBeenCalledWith('You now have edit access to this document.');
+		await waitFor(() => expect(screen.queryByText('View Only')).toBeNull());
+	});
+
+	it('doc_saved shows the last save time when idle', async () => {
+		const ws = await connect();
+		const savedAt = '2026-03-08T09:30:00Z';
+
+		receive(ws, { type: 'doc_saved', updated_at: savedAt });
+
+		expect(
+			await screen.findByText(`Last save at ${new Date(savedAt).toLocaleTimeString()}`)
+		).toBeInTheDocument();
+	});
+
+	it('doc_saved confirms an in-flight save, then returns to idle', async () => {
+		vi.mocked(put).mockImplementation(() => new Promise(() => {}));
+		const ws = await connect();
+		const titleInput = screen.getByPlaceholderText('Untitled Document');
+
+		vi.useFakeTimers();
+		await fireEvent.input(titleInput, { target: { value: 'Renamed' } });
+		expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+		await vi.advanceTimersByTimeAsync(1500);
+		expect(screen.getByText('Saving...')).toBeInTheDocument();
+
+		receive(ws, { type: 'doc_saved', updated_at: '2026-03-08T09:30:00Z' });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(screen.getByText('All changes saved')).toBeInTheDocument();
+
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(screen.getByText(/^Last save at /)).toBeInTheDocument();
+	});
+
+	it('doc_restored by another user warns with who and which version', async () => {
+		const ws = await connect();
+		receive(ws, { type: 'connection_success', can_write: true, user_id: '1' });
+
+		receive(ws, {
+			type: 'doc_restored',
+			content: { ops: [{ insert: 'old\n' }] },
+			updated_at: '2026-03-08T09:30:00Z',
+			restored_by: '2',
+			restored_by_username: 'alice',
+			restored_to_version: 3,
+			new_version_number: 5
+		});
+
+		expect(toastWarning).toHaveBeenCalledWith('alice 已將文件還原到版本 3');
+		expect(await screen.findByText('All changes saved')).toBeInTheDocument();
+	});
+
+	it('doc_restored by the current user does not warn again', async () => {
+		const ws = await connect();
+		receive(ws, { type: 'connection_success', can_write: true, user_id: '1' });
+
+		receive(ws, {
+			type: 'doc_restored',
+			content: { ops: [{ insert: 'old\n' }] },
+			updated_at: '2026-03-08T09:30:00Z',
+			restored_by: '1',
+			restored_by_username: 'me',
+			restored_to_version: 3,
+			new_version_number: 5
+		});
+
+		expect(toastWarning).not.toHaveBeenCalled();
+	});
+
+	it('tracks online users from presence_sync, user_join and user_leave (excluding self)', async () => {
+		const ws = await connect();
+		receive(ws, { type: 'connection_success', can_write: true, user_id: '1' });
+
+		receive(ws, {
+			type: 'presence_sync',
+			users: [
+				{ user_id: '1', username: 'me', color: '#111111' },
+				{ user_id: '2', username: 'alice', color: '#222222' }
+			]
+		});
+		const alice = await screen.findByTitle('alice');
+		expect(alice).toHaveTextContent('A');
+		expect(alice).toHaveStyle({ backgroundColor: '#222222' });
+		expect(screen.queryByTitle('me')).toBeNull();
+
+		receive(ws, { type: 'user_join', user_id: '3', username: 'bob', color: '#333333' });
+		expect(await screen.findByTitle('bob')).toHaveTextContent('B');
+
+		receive(ws, { type: 'user_leave', user_id: '2' });
+		await waitFor(() => expect(screen.queryByTitle('alice')).toBeNull());
+		expect(screen.getByTitle('bob')).toBeInTheDocument();
+		expect(quillEditorExports.removeCursor).toHaveBeenCalledWith('2');
+	});
+
+	it('forwards remote cursors to the editor', async () => {
+		const ws = await connect();
+		const cursor = { index: 4, length: 2 };
+
+		receive(ws, { type: 'cursor_move', user_id: '2', username: 'alice', color: '#222222', cursor });
+
+		expect(quillEditorExports.setCursor).toHaveBeenCalledWith('2', 'alice', '#222222', cursor);
+	});
+
+	it.each([
+		[{ error_code: 'RATE_LIMITED', retry_after: 2.2 }, 'warning', 'Too fast! Wait 3s'],
+		[{ error_code: 'READ_ONLY' }, 'warning', 'You have read-only access to this document.'],
+		[
+			{ error_code: 'INVALID_JSON', message: 'Invalid JSON format' },
+			'error',
+			'Invalid JSON format'
+		],
+		[{ error_code: 'UNKNOWN' }, 'error', 'An error occurred.']
+	])('runtime error %o is shown as %s', async (payload, level, expected) => {
+		const ws = await connect();
+
+		receive(ws, { type: 'error', ...payload });
+
+		const toast = level === 'warning' ? toastWarning : toastError;
+		expect(toast).toHaveBeenCalledWith(expected);
+	});
+
+	it('ai_stream_error falls back to a default message', async () => {
+		const ws = await connect();
+
+		receive(ws, { type: 'ai_stream_error', message: 'AI 服務未配置' });
+		receive(ws, { type: 'ai_stream_error' });
+
+		expect(toastError).toHaveBeenNthCalledWith(1, 'AI 服務未配置');
+		expect(toastError).toHaveBeenNthCalledWith(2, 'AI 串流失敗');
+	});
+
+	describe('close codes', () => {
+		it('does nothing on a normal close', async () => {
+			const ws = await connect();
+			vi.useFakeTimers();
+
+			ws.onclose!({ code: 1000, reason: '' });
+			await vi.advanceTimersByTimeAsync(60000);
+
+			expect(sockets()).toHaveLength(1);
+			expect(toastError).not.toHaveBeenCalled();
+		});
+
+		it('4001 logs out and redirects to login', async () => {
+			const ws = await connect();
+
+			ws.onclose!({ code: 4001, reason: '' });
+
+			expect(toastError).toHaveBeenCalledWith('Session expired. Please login again.');
+			expect(logout).toHaveBeenCalled();
+			expect(goto).toHaveBeenCalledWith('/login');
+			expect(await screen.findByText('Error saving document')).toBeInTheDocument();
+		});
+
+		it('4002 refreshes the token and reconnects', async () => {
+			vi.mocked(refreshAccessToken).mockResolvedValue(true);
+			vi.spyOn(Math, 'random').mockReturnValue(0);
+			const ws = await connect();
+			vi.useFakeTimers();
+
+			ws.onclose!({ code: 4002, reason: '' });
+			await vi.advanceTimersByTimeAsync(999);
+			expect(sockets()).toHaveLength(1);
+			await vi.advanceTimersByTimeAsync(1);
+
+			expect(refreshAccessToken).toHaveBeenCalled();
+			expect(sockets()).toHaveLength(2);
+			expect(logout).not.toHaveBeenCalled();
+		});
+
+		it('4002 logs out when the token cannot be refreshed', async () => {
+			vi.mocked(refreshAccessToken).mockResolvedValue(false);
+			const ws = await connect();
+
+			ws.onclose!({ code: 4002, reason: '' });
+
+			await waitFor(() => expect(goto).toHaveBeenCalledWith('/login'));
+			expect(toastError).toHaveBeenCalledWith('Session expired. Please login again.');
+			expect(logout).toHaveBeenCalled();
+		});
+
+		it('4003 without a backend message uses the default text', async () => {
+			const ws = await connect();
+
+			ws.onclose!({ code: 4003, reason: '' });
+
+			expect(toastError).toHaveBeenCalledWith(
+				'You do not have permission to access this document.'
+			);
+			expect(goto).toHaveBeenCalledWith('/dashboard');
+		});
+
+		it('4004 goes back to the dashboard', async () => {
+			const ws = await connect();
+
+			ws.onclose!({ code: 4004, reason: '' });
+
+			expect(toastError).toHaveBeenCalledWith('Document not found.');
+			expect(goto).toHaveBeenCalledWith('/dashboard');
+		});
+
+		it('4005 asks to close tabs without navigating or reconnecting', async () => {
+			const ws = await connect();
+			vi.useFakeTimers();
+
+			ws.onclose!({ code: 4005, reason: '' });
+			await vi.advanceTimersByTimeAsync(60000);
+
+			expect(toastError).toHaveBeenCalledWith('Too many open tabs. Please close some and refresh.');
+			expect(goto).not.toHaveBeenCalled();
+			expect(sockets()).toHaveLength(1);
+		});
+
+		it('other application codes surface the close reason', async () => {
+			const ws = await connect();
+
+			ws.onclose!({ code: 4999, reason: 'Custom reason' });
+
+			expect(toastError).toHaveBeenCalledWith('Custom reason');
+		});
+
+		it('transient closes reconnect with exponential backoff and restore notice', async () => {
+			vi.spyOn(Math, 'random').mockReturnValue(0);
+			const ws = await connect();
+			vi.useFakeTimers();
+
+			// 第 1 次：1s 後重連
+			ws.onclose!({ code: 1006, reason: '' });
+			await vi.advanceTimersByTimeAsync(0);
+			expect(screen.getByText('Connecting...')).toBeInTheDocument();
+			await vi.advanceTimersByTimeAsync(999);
+			expect(sockets()).toHaveLength(1);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(sockets()).toHaveLength(2);
+
+			// 第 2 次（尚未收到 connection_success）：退避加倍為 2s
+			sockets()[1].onclose!({ code: 1006, reason: '' });
+			await vi.advanceTimersByTimeAsync(1999);
+			expect(sockets()).toHaveLength(2);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(sockets()).toHaveLength(3);
+
+			// 重連成功才歸零並提示
+			receive(sockets()[2], { type: 'connection_success', can_write: true, user_id: '1' });
+			expect(toastSuccess).toHaveBeenCalledWith('Connection restored.');
+		});
+
+		it('jitter adds up to 50% to the backoff delay', async () => {
+			vi.spyOn(Math, 'random').mockReturnValue(0.5);
+			const ws = await connect();
+			vi.useFakeTimers();
+
+			ws.onclose!({ code: 1006, reason: '' });
+			await vi.advanceTimersByTimeAsync(1249);
+			expect(sockets()).toHaveLength(1);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(sockets()).toHaveLength(2);
+		});
+
+		it('gives up after 5 failed reconnect attempts', async () => {
+			vi.spyOn(Math, 'random').mockReturnValue(0);
+			const ws = await connect();
+			vi.useFakeTimers();
+
+			ws.onclose!({ code: 1006, reason: '' });
+			for (let attempt = 1; attempt <= 5; attempt++) {
+				await vi.advanceTimersByTimeAsync(30000);
+				expect(sockets()).toHaveLength(attempt + 1);
+				sockets().at(-1)!.onclose!({ code: 1006, reason: '' });
+			}
+			await vi.advanceTimersByTimeAsync(60000);
+
+			expect(sockets()).toHaveLength(6);
+			expect(toastError).toHaveBeenCalledWith('Connection lost. Please refresh the page.');
+			expect(screen.getByText('Error saving document')).toBeInTheDocument();
+		});
+	});
+});
+
+describe('Document Page - initial permissions and cleanup', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		setupBrowserMocks();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('hides owner actions unless is_owner is exactly true', async () => {
+		vi.mocked(get).mockResolvedValue({ ...mockDoc, is_owner: 'yes' });
+
+		render(Page);
+
+		await screen.findByPlaceholderText('Untitled Document');
+		expect(screen.queryByTitle('Share')).toBeNull();
+		expect(screen.queryByTitle('Delete')).toBeNull();
+	});
+
+	it('shows owner actions for the owner', async () => {
+		vi.mocked(get).mockResolvedValue(mockDoc);
+
+		render(Page);
+
+		expect(await screen.findByTitle('Share')).toBeInTheDocument();
+		expect(screen.getByTitle('Delete')).toBeInTheDocument();
+	});
+
+	it('starts read-only only when the API says can_write is false', async () => {
+		vi.mocked(get).mockResolvedValue({ ...mockDoc, is_owner: false, can_write: false });
+		render(Page);
+		expect(await screen.findByText('View Only')).toBeInTheDocument();
+		expect(screen.getByPlaceholderText('Untitled Document')).toBeDisabled();
+	});
+
+	it('treats a missing can_write as writable', async () => {
+		const { can_write: _ignored, ...withoutFlag } = mockDoc;
+		vi.mocked(get).mockResolvedValue({ ...withoutFlag, is_owner: false });
+		render(Page);
+		const title = await screen.findByPlaceholderText('Untitled Document');
+		expect(title).not.toBeDisabled();
+		expect(screen.queryByText('View Only')).toBeNull();
+	});
+
+	it('closes the socket without reconnecting when leaving the page', async () => {
+		vi.mocked(get).mockResolvedValue(mockDoc);
+		const { unmount } = render(Page);
+		await waitFor(() => expect(globalThis.WebSocket).toHaveBeenCalled());
+		const ws = vi.mocked(globalThis.WebSocket).mock.instances[0] as unknown as MockWebSocket;
+		vi.useFakeTimers();
+
+		unmount();
+		await vi.advanceTimersByTimeAsync(60000);
+
+		expect(ws.close).toHaveBeenCalled();
+		expect(ws.onclose).toBeNull();
+		expect(globalThis.WebSocket).toHaveBeenCalledTimes(1);
 	});
 });
